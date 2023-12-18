@@ -1,0 +1,11 @@
+= Learning Rama: Day 1
+
+== Introduction
+
+I want to learn the amazing programming platform Rama by trying to apply it to a problem I know well: Ardoq. Ardoq is a SaaS tool for enterprise architects and others, to map and model the resources, processes, assets, and strategy in an organization. The heart of Ardoq is a property multi-graph: a directed graph with multiple directed edges between nodes, and with an arbitrary bag of properties attached to nodes and edges.
+
+There is of course no way to rewrite Ardoq in Rama in one person in a few days. Instead, I want to explore two things: (1) How can I model, store, and manage our core data in Rama instead of a relational database? (2) How does Rama make a few selected features simpler/harder to write?
+
+== Day 1
+
+TBD

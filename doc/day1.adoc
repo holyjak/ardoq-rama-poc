@@ -2,10 +2,83 @@
 
 == Introduction
 
-I want to learn the amazing programming platform Rama by trying to apply it to a problem I know well: Ardoq. Ardoq is a SaaS tool for enterprise architects and others, to map and model the resources, processes, assets, and strategy in an organization. The heart of Ardoq is a property multi-graph: a directed graph with multiple directed edges between nodes, and with an arbitrary bag of properties attached to nodes and edges.
+I want to learn the amazing programming platform Rama by applying it to a problem I know well: https://www.ardoq.com/[Ardoq]. Ardoq is a SaaS tool for enterprise architects and others, to map and model the resources, processes, assets, and strategy in an organization. The heart of Ardoq is a property multi-graph: a directed graph with multiple directed edges between nodes, and with an arbitrary bag of properties attached to nodes and edges.
 
 There is of course no way to rewrite Ardoq in Rama in one person in a few days. Instead, I want to explore two things: (1) How can I model, store, and manage our core data in Rama instead of a relational database? (2) How does Rama make a few selected features simpler/harder to write?
 
 == Day 1
 
-TBD
+=== Planning
+
+I've decided to start with the following features:
+
+. Basic features:
+ .. CRUD for nodes and edges, which we call Components and References, with the associated https://help.ardoq.com/en/articles/44158-what-is-a-field["custom fields"] a.k.a. properties
+ .. CRUD for https://help.ardoq.com/en/articles/44159-what-are-metamodels[Metamodels] with Component and Reference types. Each group of components and references has an associated metamodel, which primarily defines the customer-defined types of components and references that can be created (such as Application, Business Capability, Is Owned By, etc.).
+ .. CRUD for Fields, which are metadata describing custom fields (what type of data they contain, etc.)
+. Advanced features:
+.. Making it possible to revert changes, even several versions back, and to present an audit/change log of who changed what, when 
+ .. (Elementary) Graph search and traversal
+ ... Retrieve all components and references within a particular model
+ ... Find all components of a particular type, possibly only if they have/lack a reference of a particular type
+
+This presents a number of interesting problems. For example:
+
+* "Cascading changes": When deleting a component, delete also all incoming and outgoing references. When deleting a Field definition, remove also all "instances" of the field from all relevant components and references.
+* Ensuring referential integrity: Both "ends" of a reference must exist. The reference type used by a reference must exist.
+* Transactions: When creating a bunch of components and references, either create all or none
+* An efficient graph search
+* An efficient way to store and search changes / history
+
+A lot is of course left out: access control, multi-tenancy, many features such as surveys, presentations, and dashboards, and other things.
+
+=== Execution
+
+I started with the https://github.com/redplanetlabs/rama-clojure-starter[rama-clojure-starter] and Cursive, which has recently got a basic but already very useful support for Rama.
+
+==== Setup
+
+I struggled a little with basic setup, before I understood that I needed to run `lein` with both the profiles `dev` and `provided`, the latter to pull in Rama itself while running outside of a cluster. This time I already remembered to avoid pulling in Clojure itself, since Rama has it built in (customized, to handle the dataflow "language"). I also had to add a dependency on nrepl for Cursive's REPL to work. (Which would be unnecessary in Calva, I believe.) 
+
+Side note: Getting support for clj-kondo is currently somewhat manual process - you need to copy https://github.com/redplanetlabs/rama-clj-kondo/tree/master/clj-kondo.exports/com.rpl/rama[com.rpl] into your `.clj-kondo/com.rpl` and add it to `:config-path` in your `config.edn`. I expect that Rama post v0.11.0 will have it baked in and then it will suffice to run `clj-kondo ... --copy-configs` in your project.
+
+After that, everything worked fine, with only https://github.com/cursive-ide/cursive/issues/2855#issuecomment-1855635606[minor limitations] in Cursive (inability to show docstrings for some macros, and not understanding that Rama includes Clojure at v.1.11 and thus with `random-uuid`.) There are also few more https://github.com/cursive-ide/cursive/issues/2855#issuecomment-1827354295[known limitations].
+
+==== Study
+
+I have read https://blog.redplanetlabs.com/2023/08/15/how-we-reduced-the-cost-of-building-twitter-at-twitter-scale-by-100x/[the initial announcement blog post] in detail, and most of the https://blog.redplanetlabs.com/2023/10/11/introducing-ramas-clojure-api/[Introducing Rama’s Clojure API: build end-to-end scalable backends in 100x less code], and small parts of the documentation. I typically prefer to study more but I really wanted to get my hands dirty. I paid for that rush :-).
+
+==== Coding
+
+**Syntax**: I immediately run into my lack of working knowledge of Rama syntax. A cheat sheet would be extremely useful, both for Rama in general and the dataflow language in particular. Fortunately, the https://redplanetlabs.com/clojuredoc/com.rpl.rama.html[API docs] are quite decent, though they could be even better. I kind of lacked understanding the bigger picture, for example the general structure of dataflow. I had to read a few examples to figure out that the way to write processed data to a PState is via `local-transform>`.
+
+**Dataflow vs. Clojure**: Another struggle was understanding what Clojure functions and special forms can be used inside dataflows and where I have to use Rama's specific ones. Now I first check whether https://redplanetlabs.com/clojuredoc/com.rpl.rama.html[com.rpl.rama] has an alternative (as it does for if, assert, or, and others). It seems that especially https://clojure.org/reference/special_forms[special forms] are problematic. When I used `or` instead of `or>`, I got a mysterious "Don’t know how to create ISeq from: clojure.lang.Symbol" somewhere in `com.rpl.ramaspecter.navs$fn__15709` during the Rama to Clojure compilation / transpilation, which wasn't very helpful.
+
+Even if I am able to put together working code, I have no idea whether it is any good or not. Fortunately, Nathan is very helpful in the `#rama` channel in Clojurians Slack.
+
+The https://github.com/redplanetlabs/rama-demo-gallery/blob/master/src/main/clj/rama/gallery/profile_module.clj[ProfileModule] and https://github.com/redplanetlabs/rama-demo-gallery/blob/master/src/main/clj/rama/gallery/bank_transfer_module.clj[BankTransferModule] were especially useful for my case - the former deals with creating and updating entities, the latter with "transactional" updates. I wouldn't have thought of a separate depot for create and update (i.e. edit) events. I have opted for simplicity over efficiency and not used rama-helpers' ModuleUniqueIdPState for more space-efficient IDS, contrary to those examples. I was unsure about how to describe my data - do I want to use something strict, such as Thrift? Is there any benefit to or need for using Records? I don't know so I used records, as the examples do. I wouldn't even know how to integrate Thrift, or how to handle our custom fields with it.
+
+**Data structure**: I was also unsure how to model the data, in this case Components, especially with respect to the user-defined custom fields. In RDBMS we store them as a single JSON column, while in code we inline them into the Component as top-level properties. I _assumed_ I wanted to sub-index them, since I often need to search or filter based on their values, but I lack a complete understanding of what sub-indexing means and its consequences. I ended up with the schema `{UUID (map-schema Keyword Object {:subindex? true})}`, i.e. component-id (a uuid) -> component as a map from a keyword to an arbitrary object. I could also have used https://redplanetlabs.com/clojuredoc/com.rpl.rama.html#var-fixed-keys-schema[fixed-keys-schema] for the Ardoq-defined Component properties, with custom fields nested under a sub-indexed property, similarly as in the current DB. I am not sure what are the tradeoffs and which one to pick.
+
+**Returning data**: Currently, a Create operation in Ardoq returns the complete entity. I wanted to keep that, and also to make it idempotent so that re-submitting the same request (with the same uuid) would simply return the original entity. That was quite simple with a `local-select>` to check for existence and the recently added `ack-return>` for returning the entity from the dataflow. But it broke when the entity already existed, because the select returned a `...durable.RocksDBWrapper`, which isn't serializable. Nathan kindly explained that it is because a sub-indexed thing could potentially be much larger than memory, and suggested turning it into a simple map with https://github.com/redplanetlabs/specter/wiki/List-of-Navigators#view[Specter's view] (which I had no idea existed) and old good `(into {} ...)`. Many thanks! 
+
+I have also tried to return the full PState, for troubleshooting, but that wasn't possible either - you https://redplanetlabs.com/docs/~/pstates.html#_how_client_queries_are_routed&gsc.tab=0[always need to provide a path with the key navigator], so that Rama can get the correct partition. I've spent some time fighting it over this 😅.
+
+**CAS**: My last struggle and success was implementing "compare-and-set" semantics for updates, i.e. only set a component property to the new value if it still has the expected value. I have quickly discovered `assert!` and `throw!` and used them to try to prevent the update from happening. That did not work, because Rama just kept retrying the operation. Thus I learned not to use exceptions for flow control and instead used an `if>` that either updates the data with `local-transform>` or returns an error message with `ack-return>`. Nathan confirmed that this was a reasonable way to do it. Though I am not finished yet because currently this would prevent updates to properties that have changed in the meantime but still allowed those that did not. That may be desirable in some cases, but I would rather prefer transactional semantics of "all or nothing". I believe it will be straightforward to change to that.
+
+=== Next steps
+
+I want to reimplement CAS as suggested above, and add support for delete for retrieving the data. Next, I will also add references, and will start looking into data integrity and transactions. Adding support for richer data access patterns will force me to create more PStates to support them.
+
+=== Lesson learned
+
+* The learning curve is somewhat steep, with all the new syntax and concepts. Even if I think I have an idea of how something works and fits together, it doesn't mean I can use it [well]. This is as expected.
+* Even if you understand the syntax and concepts, knowing how to combine them to build applications is a whole new level of challenge. (Similarly as it was with Clojure itself for me.)
+* https://github.com/redplanetlabs/rama-demo-gallery/tree/master[rama-demo-gallery] is an awesome learning source. Go and read through all of it before starting coding.
+* Errors are sometimes not very helpful, thrown with a deep stack during compilation. Fortunately, this is an area of active work by the team.
+* Aside of Rama and the dataflow language, you also need to learn Specter for navigating, searching, updating, and transforming data, which isn't too hard but neither is it trivial.
+
+=== The code
+
+See `src/ardoq_rama_poc/module/core.clj` at the `day1` tag.
+

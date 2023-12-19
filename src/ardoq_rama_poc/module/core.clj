@@ -3,8 +3,8 @@
         [com.rpl.rama.path])
   (:require [com.rpl.rama.aggs :as aggs]
             [com.rpl.rama.ops :as ops]
-    ;; FIXME rm
-            [com.rpl.rama.test :as rtest])
+            [com.rpl.rama.test :as rtest] ;; FIXME rm
+            )
   (:import (clojure.lang Keyword)
            (java.util UUID)))
 

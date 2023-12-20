@@ -1,8 +1,11 @@
-# rama-clojure-starter
+# I am learning Rama by re-implementing parts of Ardoq
 
-PoC of Ardoq based on Rama - Ardoq hackaton 2023.
+This is a learning project, which I initiated to get a practical experience with the [fascinating Rama programming platform](https://blog.redplanetlabs.com/2023/08/15/how-we-reduced-the-cost-of-building-twitter-at-twitter-scale-by-100x/). Started at Ardoq hackaton 2023.
 
-**See `doc/` for detail.**
+**See `doc/` for details:**
+
+1. [Day 1 log](/doc/day1.adoc)
+2. TBD
 
 Note that Rama AOT compiles a specific Clojure version in its jar, so you can't specify a different version of Clojure in your dependencies.
 

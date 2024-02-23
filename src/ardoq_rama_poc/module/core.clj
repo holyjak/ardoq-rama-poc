@@ -17,17 +17,26 @@
   {:pre [(uuid? (:_id m))]}
   (map->ComponentCreate m))
 
-(def as-map (partial into {}))
-
 (defn edits->before+after
   "Return [{:f1 'before',...} {:f1 'after',...}] from the combined edits' :before and :after values."
   [edits]
+  (assert (every? keyword? (map :field edits)))
   [(into {}
          (map (juxt :field :before))
          edits)
    (into {}
          (map (juxt :field :after))
          edits)])
+
+(defn diffs
+  "What in the map exp. differs from the map act.?"
+  [expected actual]
+  (not-empty
+    (into {}
+          (keep (fn [[k exp-val]]
+                  (when (not= (get actual k) exp-val)
+                    [k [exp-val (get actual k)]])))
+                  expected)))
 
 (defmodule ArdoqCore [setup topologies]
   (declare-depot setup *component-depot (hash-by :_id)) ; TODO Include orgid in partitioning for tenant isolation
@@ -38,8 +47,7 @@
 
       ;; CREATES
       (source> *component-depot :> *component)
-      (local-select> [(keypath (:_id *component)) (view as-map)] $$component-by-id :> *existing-component) ; view <> subindexed map not serializable
-      (println "existing-component" *existing-component)
+      (local-select> [(keypath (:_id *component))] $$component-by-id :> *existing-component) ; view <> subindexed map not serializable
       (<<if (nil? *existing-component)
         (local-transform> [(keypath (:_id *component))
                            (termval *component)] $$component-by-id))
@@ -47,21 +55,19 @@
 
       ;; UPDATES
       (source> *component-edits :> {:keys [*_id *edits]})
-
       (edits->before+after *edits :> [*before *after])
-      (println "JHDBG: before" *before) ; FIXME rm
-      ;(local-select> (keypath *_id *field) $$component-by-id :> *existing-val)
+      (local-select> [(keypath *_id) (view select-keys (keys *before))] $$component-by-id :> *existing)
+      (identity (merge (zipmap (keys *before) (repeat nil)) *existing) :> *existing) ; *bef. may have {:k nil} while *ex. may omit the key, for us both cases =
+      (identity (= *before *existing) :> *unchanged-since-read?)
 
-      (ops/explode *edits :> {:keys [*field *before *after]})
-      (<<shadowif *field string? (keyword *field)) ; TODO is this the optimal way?
-      (local-select> (keypath *_id *field) $$component-by-id :> *existing-val)
-      ;; FIXME: Keeps retrying and failing!
-      (<<if (= *existing-val *before)
-        (local-transform> [(keypath *_id *field) (termval *after)] $$component-by-id)
+      (<<if *unchanged-since-read?
+        (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id)
         (else>)
         (ack-return> {:message "Compare-and-set failed, the DB value differs from the value the client expected."
-                      :data {:field *field :db-val *existing-val :client-val *before}}))))
-  )
+                      :data (diffs *before *existing)}))
+
+      ;; DELETES TODO: Also children, later refs
+      )))
 
 (defn uuid
   ([] (random-uuid))
@@ -70,35 +76,6 @@
 
 (comment
 
-  (defn diffs
-    "What in the map a differs from the map b?"
-    [a b]
-    (not-empty
-      (into {}
-            (remove (fn [[k v]] (and (contains? b k) (= (get b k) v)))
-                    a))))
-
-  ;;
-  ;; WIP - compare ALL incoming edits with corresponding stored fields to decide CAS
-  ;;
-  (with-open [ps (rtest/create-test-pstate {UUID (map-schema Keyword Object)})]
-    (rtest/test-pstate-transform [(keypath (uuid 1)) (termval {:n 1, :x :ignored})] ps)
-    (?<-
-      (identity [{:field :n :before 1 :after 2} {:field :t :before nil :after "new"}] :> *edits)
-      (edits->before+after *edits :> [*before *after])
-      (local-select> [(keypath (uuid 1)) (view select-keys (keys *before))] ps :> *existing)
-      (identity (merge (zipmap (keys *before) (repeat nil)) *existing) :> *existing)
-      (identity (= *before *existing) :> *unchanged-since-read?)
-      (println "*existing =" *existing
-               "*before =" *before
-               "=> CAS ok? (*before =?= *existing):"
-               *unchanged-since-read?
-               (diffs *before *existing)))
-      ))
-
-  (clojure.repl/doc view)
-
-  (some? ipc)
   (defonce ipc (rtest/create-ipc)) ; (close! ipc)
   (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})
   (rtest/update-module! ipc ArdoqCore)
@@ -110,11 +87,12 @@
 
   ;; CREATE
   (get (foreign-append! component-depot (->comp {:_id (uuid 1) :name "first"})) "component")
+  (foreign-append! component-depot (->comp {:_id (uuid 2) :name "second"}))
   ;; UPDATE
   (->
    (foreign-append! component-edits-depot
                     (map->ComponentEdits {:_id (uuid 1)
-                                          :edits [(map->ComponentEdit {:field "name"
+                                          :edits [(map->ComponentEdit {:field :name
                                                                        :before "first"
                                                                        :after "primero"})]}))
    (get "component"))

@@ -1,0 +1,13 @@
+= Learning Rama: Day 2
+
+== Experiences
+
+=== Goal 1: Change the compare-and-set update to be not per field but er the whole update
+
+Good: Leveraging `rtest/create-test-pstate` and dataflow `?<-` for quick feedback w/o the need to update the module.
+Bad: How to get "select-keys <relevant>" from the PState? I know `view` but `(local-select> [(keypath (uuid 1)) (view #(select-keys % (keys *before)))] ps :> *existing)` fails.
+Is there some Specter thingy I should be using instead? The compile-time stacktrace is of no use.
+* A: As discussed in docs https://clojurians.slack.com/archives/C05N2M7R6DB/p1707248401409179?thread_ts=1707245968.332939&cid=C05N2M7R6DB[and slack], no special forms can be used in dataflow code - either I need to declare top-level named function, or perhaps leverage `<<ramafn`
+* Possible solution: `(<<ramafn %sel-ks [*m] (:> (select-keys *m (keys *before)))) (local-select> [(keypath (uuid 1)) (view %sel-ks)] ps :> *existing)` - but even better, with latest Rama, `view` can take extra args, so I can write: `(local-select> [(keypath (uuid 1)) (view select-keys (keys *before))] ps :> *existing)`
+
+Took a long break, to read properly all of the docs.

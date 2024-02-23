@@ -5,6 +5,7 @@
                               :url "https://nexus.redplanetlabs.com/repository/maven-public-releases"}]]
 
   :profiles {:dev {:resource-paths ["test/resources/"]
-                   :dependencies [[nrepl "1.1.0"]]}
-             :provided {:dependencies [[com.rpl/rama "0.11.0"]]}}
+                   :dependencies [[nrepl "1.1.0"]
+                                  ["djblue/portal" "RELEASE" :exclusions [org.clojure/clojure]]]}
+             :provided {:dependencies [[com.rpl/rama "0.11.9"]]}}
   )

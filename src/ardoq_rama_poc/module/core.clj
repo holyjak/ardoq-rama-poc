@@ -3,7 +3,7 @@
             [com.rpl.rama.path :as p :refer :all]
             [com.rpl.rama.aggs :as aggs]
             [com.rpl.rama.ops :as ops]
-            [com.rpl.rama.test :as rtest] ;; FIXME rm
+            [com.rpl.rama.test :as rtest] ;; TODO rm when done playing in the comment
             [clojure.repl :refer [doc]]
             )
   (:import (clojure.lang Keyword)
@@ -12,6 +12,7 @@
 (defrecord ComponentCreate [_id name #_rootWorkspace])
 (defrecord ComponentEdit [field before after])
 (defrecord ComponentEdits [_id edits])
+(defrecord ComponentDelete [_id])
 
 (defn ->comp [m]
   {:pre [(uuid? (:_id m))]}
@@ -41,9 +42,12 @@
 (defn some-select-keys [m ks]
   (some-> m (select-keys ks)))
 
+;; TODO: 1. Delete
+;; TODO: 1. Parents - FK verification on create, update + rm child subtree on delete
 (defmodule ArdoqCore [setup topologies]
   (declare-depot setup *component-depot (hash-by :_id)) ; TODO Include orgid in partitioning for tenant isolation
   (declare-depot setup *component-edits (hash-by :_id)) ; TODO Include orgid in partitioning for tenant isolation
+  (declare-depot setup *component-deletes (hash-by :_id)) ; TODO Include orgid in partitioning for tenant isolation
   (let [s (stream-topology topologies "component")]
     (declare-pstate s $$component-by-id {UUID (map-schema Keyword Object)}) ; see also fixed-keys-schema
     (<<sources s
@@ -76,6 +80,10 @@
         (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id))
 
       ;; DELETES TODO: Also children, later refs
+      (source> *component-deletes :> *component-delete)
+      (local-select> [(must (:_id *component-delete))] $$component-by-id :> *existing-component)
+      (ifexpr *existing-component
+              (local-transform> [(keypath (:_id *component-delete)) NONE>] $$component-by-id))
       )))
 
 (defn uuid

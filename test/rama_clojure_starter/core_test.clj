@@ -36,6 +36,26 @@
                (foreign-select-one [(keypath (uuid 1))] component-by-id))
             "The original, unchanged component is in the PState")))))
 
+(deftest crud-delete-test
+  (with-open [ipc (rtest/create-ipc)]
+    (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})
+
+    (let [component-depot (foreign-depot ipc (get-module-name ArdoqCore) "*component-depot")
+          *component-deletes-depot (foreign-depot ipc (get-module-name ArdoqCore) "*component-deletes")
+          component-by-id (foreign-pstate ipc (get-module-name ArdoqCore) "$$component-by-id")
+          comp1 (sut/->comp {:_id (uuid 1) :name "first" :f1 1, :f2 true, :f3 nil})]
+      (foreign-append! component-depot comp1)
+      (is (= (uuid 1)
+             (foreign-select-one [(keypath (uuid 1) :_id)] component-by-id))
+          "Precondition: exists")
+      (is (= {}
+             (foreign-append! *component-deletes-depot (sut/->ComponentDelete (uuid 1)))))
+      (is (= nil
+             (foreign-select-one [(keypath (uuid 1))] component-by-id))
+          "Doesn't exist anymore")
+      )
+  ))
+
 (deftest crud-update-test
   (with-open [ipc (rtest/create-ipc)]
     (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})

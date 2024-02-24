@@ -13,3 +13,5 @@ Is there some Specter thingy I should be using instead? The compile-time stacktr
 Lesson learned: Avoid exceptions at all cost (e.g. from an assert, division by zero, or whatever). They turn the data into a "poison pill", as the topology will keep retrying to process it until you notice it through telemetry and deploy a new, fixed version. The dataflow language has no try-catch. Verify data is valid when entering the system, do rigorous testing, when necessary, wrap individual functions with try-catch.
 
 Took a long break, to read properly all of the docs.
+
+Trying to https://clojurians.slack.com/archives/C05N2M7R6DB/p1708803169313039[figure out] how to translate a Java Path to remove a top element, since there is no obvious `termVoid` equivalent (use `NONE>`)

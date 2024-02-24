@@ -38,6 +38,9 @@
                     [k [exp-val (get actual k)]])))
                   expected)))
 
+(defn some-select-keys [m ks]
+  (some-> m (select-keys ks)))
+
 (defmodule ArdoqCore [setup topologies]
   (declare-depot setup *component-depot (hash-by :_id)) ; TODO Include orgid in partitioning for tenant isolation
   (declare-depot setup *component-edits (hash-by :_id)) ; TODO Include orgid in partitioning for tenant isolation
@@ -56,15 +59,21 @@
       ;; UPDATES
       (source> *component-edits :> {:keys [*_id *edits]})
       (edits->before+after *edits :> [*before *after])
-      (local-select> [(keypath *_id) (view select-keys (keys *before))] $$component-by-id :> *existing)
-      (identity (merge (zipmap (keys *before) (repeat nil)) *existing) :> *existing) ; *bef. may have {:k nil} while *ex. may omit the key, for us both cases =
+      (local-select> [(keypath *_id) (view some-select-keys (keys *before))] $$component-by-id :> *existing-raw)
+      (identity (merge (zipmap (keys *before) (repeat nil)) *existing-raw) :> *existing) ; *bef. may have {:k nil} while *ex. may omit the key, for us both cases =
       (identity (= *before *existing) :> *unchanged-since-read?)
 
-      (<<if *unchanged-since-read?
-        (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id)
-        (else>)
+      (<<cond
+        (case> (nil? *existing-raw))
+        (ack-return> {:message "The entity does not exist"
+                      :data {:_id *_id}})
+
+        (case> (not *unchanged-since-read?))
         (ack-return> {:message "Compare-and-set failed, the DB value differs from the value the client expected."
-                      :data (diffs *before *existing)}))
+                      :data (diffs *before *existing)})
+
+        (default>)
+        (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id))
 
       ;; DELETES TODO: Also children, later refs
       )))
@@ -75,6 +84,12 @@
          (format "ffffffff-ffff-ffff-ffff-%012d" n))))
 
 (comment
+
+  (with-open [ps (rtest/create-test-pstate {UUID (map-schema Keyword Object)})]
+    (rtest/test-pstate-transform [(keypath (uuid 1)) (termval {:n 1, :x :ignored})] ps)
+    (?<-
+      (local-select> [(keypath (uuid 1)) (view some-select-keys [:y])] ps :> *existing) ; doesn't produce any "signal" if not found
+      (println "=>" (pr-str *existing))))
 
   (defonce ipc (rtest/create-ipc)) ; (close! ipc)
   (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})
@@ -138,4 +153,4 @@
   ;; => some core fns have been updated to be usable in dataflow and support `... :> <ramavar>` at the end of their args
 
 
-  )
+  ,)

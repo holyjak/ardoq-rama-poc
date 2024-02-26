@@ -127,7 +127,7 @@ A batch feature mostly useful in queries: use .agg without a PState argument and
 
 === Query topologies
 
-All query topologies must contain an `.originPartition` call (= back to the query's original task) as the final partitioner of the computation. The `.out` must be emitted exactly once.
+All query topologies must contain `.originPartition` (= back to the query's original task) as the final partitioner of the computation. The `.out` must be emitted exactly once.
 
 Without subindexing, the entire data structure will be stored and retrieved as a single value. This will get expensive once there’s even just a few hundred elements in it. Subindexing enables inner data structures to efficiently contain huge numbers of elements, even more than could fit into memory.
 

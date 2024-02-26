@@ -42,6 +42,8 @@
 (defn some-select-keys [m ks]
   (some-> m (select-keys ks)))
 
+;; DONE:
+;; 1. Basic create-update-delete for "components", where updates have compare-and-set semantics
 ;; TODO: 1. Delete
 ;; TODO: 1. Parents - FK verification on create, update + rm child subtree on delete
 (defmodule ArdoqCore [setup topologies]
@@ -53,8 +55,9 @@
     (<<sources s
 
       ;; CREATES
+      ;; Idempotent: If the entity already exists, return it, else create it
       (source> *component-depot :> *component)
-      (local-select> [(keypath (:_id *component))] $$component-by-id :> *existing-component) ; view <> subindexed map not serializable
+      (local-select> [(keypath (:_id *component))] $$component-by-id :> *existing-component)
       (<<if (nil? *existing-component)
         (local-transform> [(keypath (:_id *component))
                            (termval *component)] $$component-by-id))
@@ -69,21 +72,25 @@
 
       (<<cond
         (case> (nil? *existing-raw))
-        (ack-return> {:message "The entity does not exist"
+        (ack-return> {:error "The entity does not exist"
                       :data {:_id *_id}})
 
         (case> (not *unchanged-since-read?))
-        (ack-return> {:message "Compare-and-set failed, the DB value differs from the value the client expected."
+        (ack-return> {:error "Compare-and-set failed, the DB value differs from the value the client expected."
                       :data (diffs *before *existing)})
 
         (default>)
         (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id))
 
       ;; DELETES TODO: Also children, later refs
+      ;; Idempotent: If the entity doesn't exist, nothing happens
       (source> *component-deletes :> *component-delete)
       (local-select> [(must (:_id *component-delete))] $$component-by-id :> *existing-component)
       (ifexpr *existing-component
+              ;; this is never false, since the select doesn't emit in such case; can be likely simplified,
+              ;; see https://clojurians.slack.com/archives/C05N2M7R6DB/p1708899777191999
               (local-transform> [(keypath (:_id *component-delete)) NONE>] $$component-by-id))
+      #_(ack-return> *existing-component) ; option: return the deleted entity, iff it existed
       )))
 
 (defn uuid

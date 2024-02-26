@@ -120,7 +120,7 @@
               "The :name got updated")))
       (testing "CAS fail (fields updated in the meantime)"
         (is (= {"component" {:data {:f2 [true false]}
-                             :message "Compare-and-set failed, the DB value differs from the value the client expected."}}
+                             :error "Compare-and-set failed, the DB value differs from the value the client expected."}}
                (foreign-append! component-edits-depot
                                 (sut/map->ComponentEdits
                                   {:_id (uuid 1)
@@ -135,7 +135,7 @@
             "Current value != expected => error is reported"))
       (testing "entity doesn't exist"
         (is (= {"component" {:data {:_id (uuid 100)}
-                             :message "The entity does not exist"}}
+                             :error "The entity does not exist"}}
                (foreign-append! component-edits-depot
                                 (sut/map->ComponentEdits
                                   {:_id (uuid 100)

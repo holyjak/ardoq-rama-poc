@@ -1,0 +1,26 @@
+= Learning Rama: Day 3 - foreign keys and data integrity
+
+The adventure continues! In the xref:./day2.adoc[previous installment], I have created a simple C\(R)UD for "components". Today, we will spice it up and add a foreign key and data integrity maintenance. Namely, a component can have a parent, which can also have a parent, etc. I will implement two features:
+
+. Ensuring that `parent` is a valid component ID when creating or updating the value
+. A query to retrieve the full hierarchy of a component's descendants (so that it can be checked prior to a delete operation)
+ * I may want to have a computed property `has-children?` to know whether to check for descendants
+. When deleting a parent component, deleting the whole hierarchy of its descendants
+ * Likely, I need to check for children upon delete (could have got some while the deletion was issued)
+ * Should I check that it hasn't got any new descendants since a user approved the deletion? Or perhaps we should delete all approved and new anyway? Or support a `force` option to delete also potential new descendants without approval?
+
+== Design
+
+I already have `id -> component` PState and likely would want a `comp-id -> #{children IDs}` one. Rama by default pre-computes the length of sub-indexed subsequences, which would be helpful for `has-children?`, if I want to subindex it (i.e. if it is expected to tend to have over 100 elements - which I don't think is the case, though it could happen occasionally.) I could also maintain another PState, `comp-id -> count-of-children`... . Though not sure count of children is actually ever interesting. Count of all descendants could be, but that would also be more expensive to maintain. A simple has-chldren? might be enough.
+
+IMO subindexing doesn't make sense here - I expect far only units or 10s of children on average, and mostly I will want to read all of them anyway. It could be interesting to store the parent-child relationship as a tree, though I don't think that is possible (since I'd essentially need a recursive schema). I guess I could cheat and use `(map-schema String clojure.lang.PersistentArrayMap)` or something, but updating it might be expensive, and finding a particular place in the tree (i.e. the subtree for a particular descendant) would be inefficient, requiring the whole root component's tree to be read.
+
+=== Questions
+
+Calculating descendant subtree - is Rama smart enough to do this efficiently, i.e. in each iteration compute children at level N (on each node in parallel), then combine and redistribute the output so that all grand-children that hash to the same partition are loaded at the same time (instead of each being processed separately)?
+
+== Lessons Learned
+
+=== foreign-append! returns after topologies finish, even if they move to other partitions
+
+The `foreign-append!` docstring reads "`waits for data to be appended and replicated to depot partition and for all colocated stream topologies to finish processing it`", which I misunderstood as "the processing on the local partition". But as https://clojurians.slack.com/archives/C05N2M7R6DB/p1709591831009549?thread_ts=1709591725.773629&cid=C05N2M7R6DB[Nathan kindly explained], the append call only returns after the topology has completely finished, even if it is using partitioners or doing mirror calls.

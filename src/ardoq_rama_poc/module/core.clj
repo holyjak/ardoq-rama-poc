@@ -56,12 +56,33 @@
 
       ;; CREATES
       ;; Idempotent: If the entity already exists, return it, else create it
-      (source> *component-depot :> *component)
-      (local-select> [(keypath (:_id *component))] $$component-by-id :> *existing-component)
+      (source> *component-depot :> {*comp-id :_id :keys [*parent] :as *component})
+      (local-select> [(keypath *comp-id)] $$component-by-id :> *existing-component)
       (<<if (nil? *existing-component)
-        (local-transform> [(keypath (:_id *component))
-                           (termval *component)] $$component-by-id))
-      (ack-return> (or> *existing-component *component))
+        (anchor> <start>)
+
+        ;; Check parent valid, if provided
+        (<<if *parent
+          (select> [(keypath *parent) (view some?)] $$component-by-id :> *parent-component?)
+          (|hash *comp-id) ; come back to the original partition
+          ;(|path$$ $$component-by-id [(keypath *comp-id)]) ; => weird exception
+          (ifexpr (not *parent-component?)
+                  {:error "The parent entity does not exist"
+                   :data {:_id *parent}} :> *error)
+          (else>)
+          (identity nil :> *error))
+
+        ;; Save the new component (if valid)
+        (<<if (not *error)
+          (local-transform> [(keypath *comp-id)
+                             (termval *component)] $$component-by-id))
+
+        (else>)
+        (identity nil :> *error))
+
+      (ack-return> (or> *error
+                        *existing-component
+                        *component))
 
       ;; UPDATES
       (source> *component-edits :> {:keys [*_id *edits]})
@@ -102,9 +123,8 @@
 
   (with-open [ps (rtest/create-test-pstate {UUID (map-schema Keyword Object)})]
     (rtest/test-pstate-transform [(keypath (uuid 1)) (termval {:n 1, :x :ignored})] ps)
-    (?<-
-      (local-select> [(keypath (uuid 1)) (view some-select-keys [:y])] ps :> *existing) ; doesn't produce any "signal" if not found
-      (println "=>" (pr-str *existing))))
+    (?<- (local-select> [(keypath (uuid 2))] ps :> *existing)
+      (println "HERE" *existing)))
 
   (defonce ipc (rtest/create-ipc)) ; (close! ipc)
   (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})
@@ -156,6 +176,9 @@
          (println "math is dead")
          (else>) (println "math is alive"))
     (println "cond done"))
+
+  (?<- (ifexpr true "true" :> *x)
+    (:clj> *x))
 
   (deframafn add-ten [x] (+ x 10)) ; FIXME can't resolve x
   (deframaop my-operation []

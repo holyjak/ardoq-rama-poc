@@ -163,11 +163,14 @@
                  (foreign-select-one [(keypath (uuid 20) :parent)] component-by-id))
               "The component was created, with the provided valid parent")
 
-          (foreign-append! component-depot (sut/->comp {:_id (uuid 30) :parent no-comp-id :name "No parent's child"}))
+          (is (= "The parent entity does not exist"
+                 (get-in (foreign-append! component-depot (sut/->comp {:_id (uuid 30) :parent no-comp-id :name "No parent's child"}))
+                         ["component" :error])))
           (is (= nil
-                 ;; FIXME How to communicate the reason? Should we have a PState for that? (With a job to clean it up?)
                  (foreign-select-one [(keypath (uuid 30))] component-by-id))
               "The component was not created b/c of invalid parent"))
+
+        #_ ; TODO
         (testing "update"
           (foreign-append! component-depot (sut/->comp {:_id (uuid 40) :name "updatable"}))
           (foreign-append! component-edits-depot

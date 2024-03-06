@@ -59,21 +59,21 @@
       (source> *component-depot :> {*comp-id :_id :keys [*parent] :as *component})
       (local-select> [(keypath *comp-id)] $$component-by-id :> *existing-component)
       (<<if (nil? *existing-component)
-        (anchor> <start>)
+        ;(anchor> <start>)
+        ;; Do integrity checks and save it
 
         ;; Check parent valid, if provided
         (<<if *parent
-          (select> [(keypath *parent) (view some?)] $$component-by-id :> *parent-component?)
+          (select> (view contains? *parent) $$component-by-id :> *parent-exists?)
           (|hash *comp-id) ; come back to the original partition
-          ;(|path$$ $$component-by-id [(keypath *comp-id)]) ; => weird exception
-          (ifexpr (not *parent-component?)
+          (ifexpr (not *parent-exists?)
                   {:error "The parent entity does not exist"
                    :data {:_id *parent}} :> *error)
           (else>)
           (identity nil :> *error))
 
         ;; Save the new component (if valid)
-        (<<if (not *error)
+        (<<if (not *error) ; TODO clj-kondo complains about unresolved symbol https://clojurians.slack.com/archives/C05N2M7R6DB/p1709709981543949
           (local-transform> [(keypath *comp-id)
                              (termval *component)] $$component-by-id))
 

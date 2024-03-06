@@ -29,9 +29,13 @@ The `foreign-append!` docstring reads "`waits for data to be appended and replic
 
 * How to create a conditional sub-tree of computation? (the parent check)
 * How to return early from the topology when the input is invalid?
-* How to check for existence?
+* How to check for existence? A (https://clojurians.slack.com/archives/C05N2M7R6DB/p1709681282921649?thread_ts=1709673534.904289&cid=C05N2M7R6DB[thx, Nathan!]): use `(view ...)` as the whole path: `(local-select> (view contains? :x) $$ps :> *present?)`
 ** NOTE: `local-select>` w/ `keypath` returns `nil` upon no match, so I can do `(<<if *the-result ....)` later on.
-* How to select on a potentially different partition and then come back?
+* How to select on a potentially different partition and then come back? A: `select>` then `(|hash ...)`.
+
+=== Tidbits
+
+* `ifexpr` can be used with `:>` and a missing then-branch will produce `nil`, just like in clj: `(ifexpr false "..." :> *error) ; *error is nil`
 
 === From the docs
 
@@ -46,9 +50,9 @@ Dataflow code consists of a sequence of "segments", analogous to a "form" in Clo
 (+ 1 2 3 :> *sum) ; output 6 into the default stream as *sum
 
 ;; output streams :>, :a>, and :b>
-(bar :a> <aaa> *v1 *v2 ; emit ??? to the stream a, anchor aaa
-:b> <anchor-b> *v2 ; emit once, anchor anchor-b
-:> *a) ; emit once to the default stream
+(bar :a> <aaa> *v1 *v2 ; emit 2 fields to the stream a, anchor aaa
+:b> <anchor-b> *v2 ; emit a filed, anchor anchor-b
+:> *a) ; emit a field to the default stream
 
 (println "Hello") ; 0 output declarations
 ----

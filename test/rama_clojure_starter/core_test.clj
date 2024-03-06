@@ -148,6 +148,7 @@
     (let [component-depot (foreign-depot ipc (get-module-name ArdoqCore) "*component-depot")
           component-edits-depot (foreign-depot ipc (get-module-name ArdoqCore) "*component-edits")
           component-by-id (foreign-pstate ipc (get-module-name ArdoqCore) "$$component-by-id")
+          children (foreign-pstate ipc (get-module-name ArdoqCore) "$$children")
           grandparent1 (sut/->comp {:_id (uuid 2) :name "first" :f1 1, :f2 true, :f3 nil})
           parent1 (sut/->comp {:_id (uuid 1) :parent (uuid 2) :name "first" :f1 1, :f2 true, :f3 nil})
           no-comp-id (uuid 666)]
@@ -158,17 +159,22 @@
           "Precondition: exists")
       (testing "valid parent on create/update"
         (testing "create"
-          (foreign-append! component-depot (sut/->comp {:_id (uuid 20) :parent (uuid 1) :name "child 1"}))
-          (is (= (uuid 1)
-                 (foreign-select-one [(keypath (uuid 20) :parent)] component-by-id))
-              "The component was created, with the provided valid parent")
+          (testing "valid parent"
+            (foreign-append! component-depot (sut/->comp {:_id (uuid 20) :parent (uuid 1) :name "child 1"}))
+            (is (= (uuid 1)
+                   (foreign-select-one [(keypath (uuid 20) :parent)] component-by-id))
+                "The component was created, with the provided valid parent")
+            (is (= #{(uuid 20)}
+                   (foreign-select-one [(keypath (uuid 1))] children))
+                "The component is also added to the parent's children set"))
 
-          (is (= "The parent entity does not exist"
-                 (get-in (foreign-append! component-depot (sut/->comp {:_id (uuid 30) :parent no-comp-id :name "No parent's child"}))
-                         ["component" :error])))
-          (is (= nil
-                 (foreign-select-one [(keypath (uuid 30))] component-by-id))
-              "The component was not created b/c of invalid parent"))
+          (testing "invalid parent"
+            (is (= "The parent entity does not exist"
+                   (get-in (foreign-append! component-depot (sut/->comp {:_id (uuid 30) :parent no-comp-id :name "No parent's child"}))
+                           ["component" :error])))
+            (is (= nil
+                   (foreign-select-one [(keypath (uuid 30))] component-by-id))
+                "The component was not created b/c of invalid parent")))
 
         #_ ; TODO
         (testing "update"

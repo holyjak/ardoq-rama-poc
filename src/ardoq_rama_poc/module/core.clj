@@ -64,7 +64,8 @@
 
         ;; Check parent valid, if provided
         (<<if *parent
-          (select> (view contains? *parent) $$component-by-id :> *parent-exists?)
+          (|hash *parent)
+          (local-select> (view contains? *parent) $$component-by-id :> *parent-exists?)
           (|hash *comp-id) ; come back to the original partition
           (ifexpr (not *parent-exists?)
                   {:error "The parent entity does not exist"

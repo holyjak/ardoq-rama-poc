@@ -52,10 +52,12 @@
   (declare-depot setup *component-deletes (hash-by :_id)) ; TODO Include orgid in partitioning for tenant isolation
   (let [s (stream-topology topologies "component")]
     (declare-pstate s $$component-by-id {UUID (map-schema Keyword Object)}) ; see also fixed-keys-schema
+    (declare-pstate s $$children {UUID #{UUID}}) ; no need for subindexed, don't expect more than 10s
     (<<sources s
 
       ;; CREATES
       ;; Idempotent: If the entity already exists, return it, else create it
+
       (source> *component-depot :> {*comp-id :_id :keys [*parent] :as *component})
       (local-select> [(keypath *comp-id)] $$component-by-id :> *existing-component)
       (<<if (nil? *existing-component)
@@ -76,7 +78,12 @@
         ;; Save the new component (if valid)
         (<<if (not *error) ; TODO clj-kondo complains about unresolved symbol https://clojurians.slack.com/archives/C05N2M7R6DB/p1709709981543949
           (local-transform> [(keypath *comp-id)
-                             (termval *component)] $$component-by-id))
+                             (termval *component)] $$component-by-id)
+          (<<if *parent
+            (|hash *parent)
+            ;; FIXME Different partition = no transactional semantics => the parent could have been deleted in the meantime...
+            ;; => should check $$component-by-id first and undo the creation if the parent doesn't exist or something...
+            (local-transform> [(keypath *parent) NONE-ELEM (termval *comp-id)] $$children)))
 
         (else>)
         (identity nil :> *error))
@@ -100,6 +107,11 @@
         (case> (not *unchanged-since-read?))
         (ack-return> {:error "Compare-and-set failed, the DB value differs from the value the client expected."
                       :data (diffs *before *existing)})
+
+        ;; TODO Check parent valid, if provided
+        #_(case> (invalid-parent> *component-edits)
+               (ack-return> {:error "Invalid parent"
+                             :data :TODO}))
 
         (default>)
         (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id))

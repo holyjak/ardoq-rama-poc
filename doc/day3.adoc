@@ -29,11 +29,12 @@ The `foreign-append!` docstring reads "`waits for data to be appended and replic
 
 * How to create a conditional sub-tree of computation? (the parent check)
 * How to return early from the topology when the input is invalid?
-* How to check for existence? A (https://clojurians.slack.com/archives/C05N2M7R6DB/p1709681282921649?thread_ts=1709673534.904289&cid=C05N2M7R6DB[thx, Nathan!]): use `(view ...)` as the whole path: `(local-select> (view contains? :x) $$ps :> *present?)`
+* How to check for existence? A: (https://clojurians.slack.com/archives/C05N2M7R6DB/p1709681282921649?thread_ts=1709673534.904289&cid=C05N2M7R6DB[thx, Nathan!]): use `(view ...)` as the whole path: `(local-select> (view contains? :x) ++ps :> *present?)`
+** BEWARE: This doesn't work with `select>` b/c it wouldn't know what to partition to (it needs a `(keypath ...)` for that, I assume). So I need to manually use `|hash + local-select>`.
 ** NOTE: `local-select>` w/ `keypath` returns `nil` upon no match, so I can do `(<<if *the-result ....)` later on.
 * How to select on a potentially different partition and then come back? A: `select>` then `(|hash ...)`.
 * How to do "transactional" update over partitions? I.e. update/create a component while also adding it to the parent's children list? The parent could have been deleted in the meantime... And how to test the different interleavings of events here?
-* How do I add an element to a (possibly nonexistent) set?
+* How do I add an element to a (possibly nonexistent) set? A: `(local-transform> [(keypath *parent) NONE-ELEM (termval *comp-id)] ++children)`
 
 === Tidbits
 

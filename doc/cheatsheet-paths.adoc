@@ -1,0 +1,57 @@
+= Rama Paths cheatsheet
+
+== Transform
+
+Navigators used with `local-transform>` to add, remove, and modify data.
+
+=== Virtual value navigators
+
+Navigate to the data to add/remove, specifying the data itself with `termval`.
+
+* set: `NONE-ELEM` (Java's `voidSetElem`) - navigate to inside a (possibly yet non-existent) set to add an element there
+* list: `AFTER-ELEM` (as last), `BEFORE-ELEM` (as first), `before-index`, `BEGINNING` (prepend multiple elements), `END` (append multiple elements)
+
+=== Specify the data to add or an update
+
+* `termval` - set the value at the position
+* `term` - similar to `update`, takes a `(fn [x &more])` of the current value and any collected arguments (see `collect` etc.)
+
+=== Delete
+
+* map: `NONE>` (Java's `termVoid`) - to remove the value for the preceding key
+
+== View navigators
+
+View navigators navigate you to a transformation of the currently navigated value.
+
+* `view` takes a fn of the current value and any extra args provided
+
+=== Initialize collections / data
+
+Create a new, empty collection if the value is nil. Otherwise it stays navigated at the current value.
+
+* `NIL->LIST`
+* `NIL->SET`
+* `nil->val`
+* `NIL->VECTOR`
+* `NONE->val` - set the given val if the path did not match anything
+
+== Substructure navigators
+
+A substructure navigator navigates to one of these smaller "versions" of the original structure, and transforms to those substructures affect the original locations in the parent data structure.
+
+* `submap` ~ `select-keys`
+* `subset`
+* `srange` and `srange-dynamic` - sublist
+
+=== Range navigators
+
+`sorted-map-range(|-from|-to)`, `sorted-set-range(|-from|-to)`
+
+== Control navigators
+
+Manipulate the flow of navigation.
+
+* `STAY` - essentially noop, useful when you need a path but do not want to descend
+* `STOP`
+* `subselect` - Navigates to list of values navigated by provided path. Transforms on that list will _update original locations_ of each value, no matter how nested.

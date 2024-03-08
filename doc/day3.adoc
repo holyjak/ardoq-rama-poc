@@ -67,6 +67,24 @@ I do not want either a parent or a child pointing to something that does not exi
 
 As Nathan pointed out, every PState update across all partitions is transactional in microbatching, which makes this rather simple.
 
+===== On microbatch topologies
+
+> A microbatch iteration can take anywhere from a couple hundred milliseconds to many seconds, depending on the complexity of processing and the amount of incoming data.
+>
+> -- link:pass:[https://redplanetlabs.com/docs/~/tutorial5.html#_microbatch_topologies][Tutorial: Microbatch topologies]
+
+(I assume this link:pass:[https://redplanetlabs.com/docs/~/microbatch.html#_tuning_options][can be tuned] with options such as `depot.microbatch.max.records`.)
+
+> They [microbatch topologies] have significant additional capabilities for expressing computations [such as link:pass:[https://redplanetlabs.com/docs/~/intermediate-dataflow.html#_batch_blocks][batch blocks]], different performance characteristics, and simple exactly-once fault-tolerance semantics. [I.e. an all-or-nothing atomicity.]
+
+As link:pass:[https://redplanetlabs.com/docs/~/microbatch.html#_operation_and_fault_tolerance][microbatch operation explains]:
+
+> This means all changes to all PStates on a task in a microbatch become visible at the exact same time (though changes on different tasks [~ machines] may become visible at slightly different times).
+
+NOTE: If you do depot appends as part of your microbatch topology [..], those currently do not have exactly-once semantics in the face of failures and retries. However, this is on our roadmap. [As of March 2024.]
+
+> Unless you require millisecond-level update latency for your PStates, you should generally prefer microbatch topologies. They have higher throughput and simpler fault-tolerance semantics than stream topologies. 
+
 ==== Solution 2: Streaming
 
 Let's (artificially) assume that component creation needs very short response time and thus we need to use a streaming topology. Here is a possible solution (where `[xxx]` denotes a partition):
@@ -82,9 +100,9 @@ Let's (artificially) assume that component creation needs very short response ti
 .. If the child creation failed, remove the child from the `parent->future-children` PState
 
 .Stream topologies must be retriable
-----
+****
 Any part of a distributed computation such as a stream topology may fail. Rama link:pass:[https://redplanetlabs.com/docs/~/stream.html#_fault_tolerance_and_retry_modes][solves that by retrying] such a topology from scratch. Therefore the topology must be idempotent, i.e. it must be safe to run it multiple times, and it must be able to pick up from where it failed. This implies that we must modify data in the right order. In my case, when deleting a parent, I may only delete the `$$parent->children` entry after the successful deletion of all the children. (And make sure that an attempt to delete a deleted child does nothing.)
-----
+****
 
 ==== Open questions
 

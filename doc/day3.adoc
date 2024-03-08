@@ -21,10 +21,6 @@ Calculating descendant subtree - is Rama smart enough to do this efficiently, i.
 
 == Learnings
 
-=== foreign-append! returns after topologies finish, even if they move to other partitions
-
-The `foreign-append!` docstring reads "`waits for data to be appended and replicated to depot partition and for all colocated stream topologies to finish processing it`", which I misunderstood as "the processing on the local partition". But as https://clojurians.slack.com/archives/C05N2M7R6DB/p1709591831009549?thread_ts=1709591725.773629&cid=C05N2M7R6DB[Nathan kindly explained], the append call only returns after the topology has completely finished, even if it is using partitioners or doing mirror calls.
-
 === Questions explored
 
 * How to create a conditional sub-tree of computation? (the parent check)
@@ -33,12 +29,65 @@ The `foreign-append!` docstring reads "`waits for data to be appended and replic
 ** BEWARE: This doesn't work with `select>` b/c it wouldn't know what to partition to (it needs a `(keypath ...)` for that, I assume). So I need to manually use `|hash + local-select>`.
 ** NOTE: `local-select>` w/ `keypath` returns `nil` upon no match, so I can do `(<<if *the-result ....)` later on.
 * How to select on a potentially different partition and then come back? A: `select>` then `(|hash ...)`.
-* How to do "transactional" update over partitions? I.e. update/create a component while also adding it to the parent's children list? The parent could have been deleted in the meantime... And how to test the different interleavings of events here?
 * How do I add an element to a (possibly nonexistent) set? A: `(local-transform> [(keypath *parent) NONE-ELEM (termval *comp-id)] ++children)`
+* Reusability: how to make a `valid-parent?` fragment that I could use both in the create and update flows?
 
 === Tidbits
 
 * `ifexpr` can be used with `:>` and a missing then-branch will produce `nil`, just like in clj: `(ifexpr false "..." :> *error) ; *error is nil`
+
+=== Transactional update across multiple partitions
+
+==== Background
+
+Topologies are triggered by depot appends. Rama guarantees that appends to a particular partition of a particular depot will be processed in the order of arrival. Appends to different partitions or to different depots that map to the same partition (node) do not have any such guarantee.
+
+A single depot append may link:pass:[https://redplanetlabs.com/docs/~/stream.html#_operation][result in a tree of _events_] and is only processed when they all finish successfully. link:pass:[https://redplanetlabs.com/docs/~/intermediate-dataflow.html#_yieldifovertime][What is an event]? It is all the code in between two _async boundaries_: "`An async boundary is where code moves to another task, or where a remote operation is performed. Async boundaries in Rama [.line-through]#can be# _is one of_ partitioners, localSelect calls on mirror PStates, or https://redplanetlabs.com/docs/~/integrating.html[calls to external queues or databases].`"
+
+All writes within a single event are atomic - i.e. all writes to any number of PStates (remember, on the same partition) are made visible at the same time. At least for stream topologies - in microbatching, every PState update across all partitions is atomic.
+
+This means that if a stream topology writes to multiple partitions, these writes become visible at different times, and not all at once. So what do we do if we want transactional semantics across multiple partitions, and the tradeoffs of microbatching are not acceptable, because we need a few-ms response time?
+
+==== The problem
+
+When creating a Component entity, which has another Component as its `:parent`, I want transactional semantics to ensure data integrity. Namely:
+
+. I want to check that the parent component exists
+. I want to add the new component to the parent's children set
+. I want obviously to persist the child
+
+Now, everything related to the parent happens possibly on a different partition than the child. Many things can fail here:
+
+* The parent could have been deleted after I checked it but before (or even after) I persist the child
+* The creation of the child could fail, if it fails to satisfy business rules - and the parent might thus and up pointing to a non-existent child
+
+I do not want either a parent or a child pointing to something that does not exist.
+
+==== Solution 1: Microbatching
+
+As Nathan pointed out, every PState update across all partitions is transactional in microbatching, which makes this rather simple.
+
+==== Solution 2: Streaming
+
+Let's (artificially) assume that component creation needs very short response time and thus we need to use a streaming topology. Here is a possible solution (where `[xxx]` denotes a partition):
+
+. [parent] Check that the parent exists, and add the child's id to the `parent->future-children` PState
+.. When you ask a parent about its children, this PState is ignored but if the parent is being deleted, it also schedules the deletion of its future children, by appending them to the appropriate depot
+... Here it could be beneficial to have creates and deletes in the same depot, so that we do not risk the delete being processed before the create finishes (and thus failing to delete the not-yet-existing child) [TBD: confirm]
+. [child] Check and persist the child
+. [parent] Based on the situation:
+.. If the child creation succeeded and the parent still exists then move the child to the `parent->children` PState
+... Here we have a tiny moment where a child exists but its parent doesn't show it yet, but that's OK, the eventual consistency here is not a problem for me
+... If the parent has been deleted in the meantime, then a removal of the child is already scheduled. The child may appear to some clients for a brief moment.
+.. If the child creation failed, remove the child from the `parent->future-children` PState
+
+==== Open questions
+
+How to test different "interleavings" of events, to make sure I never get into a state that would violate data integrity? RPL has a fascinating blog https://blog.redplanetlabs.com/2023/10/24/how-rama-is-tested-a-primer-on-testing-distributed-systems/[post about testing concurrent systems] but it is not clear to me whether/how I could leverage that for my tests.
+
+=== foreign-append! returns after topologies finish, even if they move to other partitions
+
+The `foreign-append!` docstring reads "`waits for data to be appended and replicated to depot partition and for all colocated stream topologies to finish processing it`", which I misunderstood as "the processing on the local partition". But as https://clojurians.slack.com/archives/C05N2M7R6DB/p1709591831009549?thread_ts=1709591725.773629&cid=C05N2M7R6DB[Nathan kindly explained], the append call only returns after the topology has completely finished, even if it is using partitioners or doing mirror calls.
 
 === From the docs
 

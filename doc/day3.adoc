@@ -81,6 +81,11 @@ Let's (artificially) assume that component creation needs very short response ti
 ... If the parent has been deleted in the meantime, then a removal of the child is already scheduled. The child may appear to some clients for a brief moment.
 .. If the child creation failed, remove the child from the `parent->future-children` PState
 
+.Stream topologies must be retriable
+----
+Any part of a distributed computation such as a stream topology may fail. Rama link:pass:[https://redplanetlabs.com/docs/~/stream.html#_fault_tolerance_and_retry_modes][solves that by retrying] such a topology from scratch. Therefore the topology must be idempotent, i.e. it must be safe to run it multiple times, and it must be able to pick up from where it failed. This implies that we must modify data in the right order. In my case, when deleting a parent, I may only delete the `$$parent->children` entry after the successful deletion of all the children. (And make sure that an attempt to delete a deleted child does nothing.)
+----
+
 ==== Open questions
 
 How to test different "interleavings" of events, to make sure I never get into a state that would violate data integrity? RPL has a fascinating blog https://blog.redplanetlabs.com/2023/10/24/how-rama-is-tested-a-primer-on-testing-distributed-systems/[post about testing concurrent systems] but it is not clear to me whether/how I could leverage that for my tests.

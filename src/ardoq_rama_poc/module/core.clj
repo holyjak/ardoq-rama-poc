@@ -42,6 +42,18 @@
 (defn some-select-keys [m ks]
   (some-> m (select-keys ks)))
 
+(defbasicblocksegmacro parent-error [component component-by-id :> maybe-error]
+  [[get component :parent :> '*parent#] ; notice keywords can't be used as fns in here :'( => get
+   [<<if '*parent#
+    [|hash '*parent#] ; I'm using a partitioner => can't use ramafn, need a segmacro
+    [local-select> (seg# view contains? '*parent#) component-by-id :> '*parent-exists?#]
+    [|hash (seg# get component :_id)] ; come back to the original partition
+    [ifexpr (seg# not '*parent-exists?#)
+     {:error "The parent entity does not exist" :data {:_id '*parent#}}
+     :> maybe-error]
+    [else>]
+    [identity nil :> maybe-error]]])
+
 ;; DONE:
 ;; 1. Basic create-update-delete for "components", where updates have compare-and-set semantics
 ;; TODO: 1. Delete
@@ -57,7 +69,7 @@
 
       ;; CREATES
       ;; Idempotent: If the entity already exists, return it, else create it
-
+      ;;
       (source> *component-depot :> {*comp-id :_id :keys [*parent] :as *component})
       (local-select> [(keypath *comp-id)] $$component-by-id :> *existing-component)
       (<<if (nil? *existing-component)
@@ -65,15 +77,7 @@
         ;; Do integrity checks and save it
 
         ;; Check parent valid, if provided
-        (<<if *parent
-          (|hash *parent)
-          (local-select> (view contains? *parent) $$component-by-id :> *parent-exists?)
-          (|hash *comp-id) ; come back to the original partition
-          (ifexpr (not *parent-exists?)
-                  {:error "The parent entity does not exist"
-                   :data {:_id *parent}} :> *error)
-          (else>)
-          (identity nil :> *error))
+        (parent-error *component $$component-by-id :> *error)
 
         ;; Save the new component (if valid)
         (<<if (not *error) ; TODO clj-kondo complains about unresolved symbol https://clojurians.slack.com/archives/C05N2M7R6DB/p1709709981543949

@@ -55,3 +55,9 @@ Manipulate the flow of navigation.
 * `STAY` - essentially noop, useful when you need a path but do not want to descend
 * `STOP`
 * `subselect` - Navigates to list of values navigated by provided path. Transforms on that list will _update original locations_ of each value, no matter how nested.
+
+== Tips
+
+You can get a sequence of results with local-select> by wrapping the path in subselect, like so: `(local-select> (subselect (keypath *user-id) ALL) $$p :> *v)`
+
+Make `[local-]select>` emit `nil` instead of not emitting at all (i.e., in order to branch rather than to stop execution): `subselect` the path, which yields an empty collection instead. (By https://clojurians.slack.com/archives/C05N2M7R6DB/p1710256251283219?thread_ts=1710251502.746089&cid=C05N2M7R6DB[Henrik.])

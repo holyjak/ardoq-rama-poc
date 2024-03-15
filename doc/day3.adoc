@@ -108,6 +108,25 @@ Any part of a distributed computation such as a stream topology may fail. Rama l
 
 How to test different "interleavings" of events, to make sure I never get into a state that would violate data integrity? RPL has a fascinating blog https://blog.redplanetlabs.com/2023/10/24/how-rama-is-tested-a-primer-on-testing-distributed-systems/[post about testing concurrent systems] but it is not clear to me whether/how I could leverage that for my tests.
 
+=== Code reuse: deframafn vs. segmacro
+
+I wanted to factor out `parent-error` to check whether component's `:parent` exists, if provided. But I learned I cannot use deframafn / deframaop for that because neither may contain partitioners. The solution is to use the inline `<<ramafn`, which did not fit here, or a link:pass:[https://redplanetlabs.com/docs/~/clj-dataflow-lang.html#_segmacros][segmacro].
+
+Pitfalls I encountered:
+
+* Segmacro run at compile time and must not contain any nested function calls (obviously 😅), unless you want them evaluated at compile time. You can turn `(f ...)` into `(seg# f ...)` to postpone its evaluation until runtime.
+* Keywords cannot be used as fns, so `(seg# :kwd thing)` https://clojurians.slack.com/archives/C05N2M7R6DB/p1710201537795019[is invalid], you need to use `get` instead
+* Partitioners cannot be used in pure dataflow `(?<- ...)`, need to actually run the module for that
+
+Many thanks to Nathan for all the help!
+
+=== Tip: One entity = one depot
+
+I've started by having 3 separate depots for Component Create, Update, and Delete operations, b/c that is what I saw in some of the examples. However it seems cleaner to me to have just a single one, as it will then provide a single source of truth of the entity. https://clojurians.slack.com/archives/C05N2M7R6DB/p1709945183106729[Nathan approves]:
+
+> yes, in general it's better to have the same entity managed through the same depot, particularly updates and deletes.
+> Putting creates and updates on different depots usually won't have ordering problems because in most apps you can't update or delete something until it's been created
+
 === foreign-append! returns after topologies finish, even if they move to other partitions
 
 The `foreign-append!` docstring reads "`waits for data to be appended and replicated to depot partition and for all colocated stream topologies to finish processing it`", which I misunderstood as "the processing on the local partition". But as https://clojurians.slack.com/archives/C05N2M7R6DB/p1709591831009549?thread_ts=1709591725.773629&cid=C05N2M7R6DB[Nathan kindly explained], the append call only returns after the topology has completely finished, even if it is using partitioners or doing mirror calls.

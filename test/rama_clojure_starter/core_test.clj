@@ -176,7 +176,6 @@
                    (foreign-select-one [(keypath (uuid 30))] component-by-id))
                 "The component was not created b/c of invalid parent")))
 
-        #_ ; TODO
         (testing "update"
           (foreign-append! component-depot (sut/->comp {:_id (uuid 40) :name "updatable"}))
           (foreign-append! component-edits-depot
@@ -195,18 +194,20 @@
                                         {:field :parent :before (uuid 1) :after no-comp-id})
                                       (sut/map->ComponentEdit
                                         {:field :f1 :before nil :after "updated"})]}))
-          (is (= {:parent (uuid 1) :f1 nil}
-                 (foreign-select-one [(keypath (uuid 40) (view select-keys [:parent :f1]))] component-by-id))
+          (is (= {:parent (uuid 1) :f1 nil #_"not 'updated'"}
+                 (foreign-select-one [(keypath (uuid 40) #_(view select-keys [:parent :f1]))] component-by-id))
               "Invalid parent fails the whole update")
 
           (testing "Component cannot be its own parent"
             (foreign-append! component-edits-depot
                              (sut/map->ComponentEdits
-                               {:_id (uuid 1)
+                               {:_id (:_id grandparent1)
                                 :edits [(sut/map->ComponentEdit
-                                          {:field :parent :before nil :after (uuid 1)})]}))
+                                          {:field :parent :before nil :after (:_id grandparent1)})]}))
             (is (= nil
-                   (foreign-select-one [(keypath (uuid 1) :parent)] component-by-id))))
+                   (foreign-select-one [(keypath (:_id grandparent1) :parent)] component-by-id))
+                "The update should have failed, and :parent remained as-was, i.e. none"))
+          #_
           (testing "No cycles allowed"
             (foreign-append! component-depot (sut/->comp {:_id (uuid 50) :parent (:_id grandparent1) :name "Mr. Loop"}))
             (is (= nil

@@ -103,6 +103,8 @@
       (identity (merge (zipmap (keys *before) (repeat nil)) *existing-raw) :> *existing) ; *bef. may have {:k nil} while *ex. may omit the key, for us both cases =
       (identity (= *before *existing) :> *unchanged-since-read?)
 
+      (parent-error (merge *existing *after) $$component-by-id :> *parent-error)
+
       (<<cond
         (case> (nil? *existing-raw))
         (ack-return> {:error "The entity does not exist"
@@ -112,10 +114,9 @@
         (ack-return> {:error "Compare-and-set failed, the DB value differs from the value the client expected."
                       :data (diffs *before *existing)})
 
-        ;; TODO Check parent valid, if provided
-        #_(case> (invalid-parent> *component-edits)
-               (ack-return> {:error "Invalid parent"
-                             :data :TODO}))
+        (case> *parent-error)
+        (ack-return> {:error "Invalid parent input"
+                      :data *parent-error})
 
         (default>)
         (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id))

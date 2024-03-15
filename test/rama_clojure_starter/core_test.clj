@@ -141,6 +141,10 @@
                                              {:field :x :before 2 :after 3})]})))
             "Attempted edit of non-existing entity ...")))))
 
+(defn select-keys-with-defaults [m ks]
+  (merge (zipmap ks (repeat nil))
+         (select-keys m ks)))
+
 (deftest parent-test
   (with-open [ipc (rtest/create-ipc)]
     (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})
@@ -195,8 +199,10 @@
                                       (sut/map->ComponentEdit
                                         {:field :f1 :before nil :after "updated"})]}))
           (is (= {:parent (uuid 1) :f1 nil #_"not 'updated'"}
-                 (foreign-select-one [(keypath (uuid 40) #_(view select-keys [:parent :f1]))] component-by-id))
-              "Invalid parent fails the whole update")
+                 (foreign-select-one [(keypath (uuid 40))
+                                      (view select-keys-with-defaults [:parent :f1])]
+                                     component-by-id))
+              "Invalid parent fails the whole update => both parent and f1 remain as before")
 
           (testing "Component cannot be its own parent"
             (foreign-append! component-edits-depot

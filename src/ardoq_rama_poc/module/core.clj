@@ -44,15 +44,21 @@
 
 (defbasicblocksegmacro parent-error [component component-by-id :> maybe-error]
   [[get component :parent :> '*parent#] ; notice keywords can't be used as fns in here :'( => get
-   [<<if '*parent#
+   [<<if (seg# not '*parent#)
+    [identity nil :> maybe-error]
+    [else>]
     [|hash '*parent#] ; I'm using a partitioner => can't use ramafn, need a segmacro
     [local-select> (seg# view contains? '*parent#) component-by-id :> '*parent-exists?#]
     [|hash (seg# get component :_id)] ; come back to the original partition
-    [ifexpr (seg# not '*parent-exists?#)
-     {:error "The parent entity does not exist" :data {:_id '*parent#}}
-     :> maybe-error]
-    [else>]
-    [identity nil :> maybe-error]]])
+    [<<cond
+     [case> (seg# not '*parent-exists?#)]
+     [identity {:error "The parent entity does not exist" :data {:parent '*parent#}} :> maybe-error]
+
+     [case> (seg# = '*parent# (seg# get component :_id))]
+     [identity {:error "Can't be ones own parent" :data {:parent '*parent#}} :> maybe-error]
+
+     [default>]
+     [identity nil :> maybe-error]]]])
 
 ;; DONE:
 ;; 1. Basic create-update-delete for "components", where updates have compare-and-set semantics
@@ -66,7 +72,7 @@
     (declare-pstate s $$component-by-id {UUID (map-schema Keyword Object)}) ; see also fixed-keys-schema
     (declare-pstate s $$children {UUID #{UUID}}) ; no need for subindexed, don't expect more than 10s
     (<<sources s
-
+      ;;
       ;; CREATES
       ;; Idempotent: If the entity already exists, return it, else create it
       ;;
@@ -96,32 +102,34 @@
                         *existing-component
                         *component))
 
+      ;;
       ;; UPDATES
+      ;;
       (source> *component-edits :> {:keys [*_id *edits] :as *UPD})
       (edits->before+after *edits :> [*before *after])
-      (local-select> [(keypath *_id) (view some-select-keys (keys *before))] $$component-by-id :> *existing-raw)
-      (identity (merge (zipmap (keys *before) (repeat nil)) *existing-raw) :> *existing) ; *bef. may have {:k nil} while *ex. may omit the key, for us both cases =
-      (identity (= *before *existing) :> *unchanged-since-read?)
+      (local-select> [(keypath *_id) (view some-select-keys (keys *before))] $$component-by-id :> *existing-view-raw)
+      (identity (merge (zipmap (keys *before) (repeat nil)) *existing-view-raw) :> *existing-view) ; *bef. may have {:k nil} while *ex. may omit the key, for us both cases =
+      (identity (= *before *existing-view) :> *unchanged-since-read?)
 
-      (parent-error (merge *existing *after) $$component-by-id :> *parent-error)
+      (parent-error (assoc *after :_id *_id) $$component-by-id :> *parent-error)
 
       (<<cond
-        (case> (nil? *existing-raw))
+        (case> (nil? *existing-view-raw))
         (ack-return> {:error "The entity does not exist"
                       :data {:_id *_id}})
 
         (case> (not *unchanged-since-read?))
         (ack-return> {:error "Compare-and-set failed, the DB value differs from the value the client expected."
-                      :data (diffs *before *existing)})
+                      :data (diffs *before *existing-view)})
 
         (case> *parent-error)
-        (ack-return> {:error "Invalid parent input"
-                      :data *parent-error})
+        (ack-return>  *parent-error)
 
         (default>)
         (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id)
         (ack-return> :OK))
 
+      ;;
       ;; DELETES TODO: Also children, later refs
       ;; Idempotent: If the entity doesn't exist, nothing happens
       (source> *component-deletes :> *component-delete)
@@ -142,8 +150,8 @@
 
   (with-open [ps (rtest/create-test-pstate {UUID (map-schema Keyword Object)})]
     (rtest/test-pstate-transform [(keypath (uuid 1)) (termval {:n 1, :x :ignored})] ps)
-    (?<- (local-select> [(keypath (uuid 2))] ps :> *existing)
-      (println "HERE" *existing)))
+    (?<- (local-select> [(keypath (uuid 2))] ps :> *existing-view)
+      (println "HERE" *existing-view)))
 
   (defonce ipc (rtest/create-ipc)) ; (close! ipc)
   (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})

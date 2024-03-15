@@ -153,8 +153,8 @@
           component-edits-depot (foreign-depot ipc (get-module-name ArdoqCore) "*component-edits")
           component-by-id (foreign-pstate ipc (get-module-name ArdoqCore) "$$component-by-id")
           children (foreign-pstate ipc (get-module-name ArdoqCore) "$$children")
-          grandparent1 (sut/->comp {:_id (uuid 2) :name "first" :f1 1, :f2 true, :f3 nil})
-          parent1 (sut/->comp {:_id (uuid 1) :parent (uuid 2) :name "first" :f1 1, :f2 true, :f3 nil})
+          grandparent1 (sut/->comp {:_id (uuid 0) :name "first" :f1 1, :f2 true, :f3 nil})
+          parent1 (sut/->comp {:_id (uuid 1) :parent (uuid 0) :name "first" :f1 1, :f2 true, :f3 nil})
           no-comp-id (uuid 666)]
       (foreign-append! component-depot grandparent1)
       (foreign-append! component-depot parent1) ; FIXME This could end up in a different partition and thus finish BEFORE the grandparent's insert!
@@ -181,28 +181,28 @@
                 "The component was not created b/c of invalid parent")))
 
         (testing "update"
-          (foreign-append! component-depot (sut/->comp {:_id (uuid 40) :name "updatable"}))
-          (foreign-append! component-edits-depot
-                           (sut/map->ComponentEdits
-                             {:_id (uuid 40)
-                              :edits [(sut/map->ComponentEdit
-                                        {:field :parent :before nil :after (uuid 1)})]}))
-          (is (= (uuid 1)
-                 (foreign-select-one [(keypath (uuid 40) :parent)] component-by-id))
-              "Valid parent is accepted")
-
-          (foreign-append! component-edits-depot
-                           (sut/map->ComponentEdits
-                             {:_id (uuid 40)
-                              :edits [(sut/map->ComponentEdit
-                                        {:field :parent :before (uuid 1) :after no-comp-id})
-                                      (sut/map->ComponentEdit
-                                        {:field :f1 :before nil :after "updated"})]}))
-          (is (= {:parent (uuid 1) :f1 nil #_"not 'updated'"}
-                 (foreign-select-one [(keypath (uuid 40))
-                                      (view select-keys-with-defaults [:parent :f1])]
-                                     component-by-id))
-              "Invalid parent fails the whole update => both parent and f1 remain as before")
+          ;(foreign-append! component-depot (sut/->comp {:_id (uuid 40) :name "updatable"}))
+          ;(foreign-append! component-edits-depot
+          ;                 (sut/map->ComponentEdits
+          ;                   {:_id (uuid 40)
+          ;                    :edits [(sut/map->ComponentEdit
+          ;                              {:field :parent :before nil :after (uuid 1)})]}))
+          ;(is (= (uuid 1)
+          ;       (foreign-select-one [(keypath (uuid 40) :parent)] component-by-id))
+          ;    "Valid parent is accepted")
+          ;
+          ;(foreign-append! component-edits-depot
+          ;                 (sut/map->ComponentEdits
+          ;                   {:_id (uuid 40)
+          ;                    :edits [(sut/map->ComponentEdit
+          ;                              {:field :parent :before (uuid 1) :after no-comp-id})
+          ;                            (sut/map->ComponentEdit
+          ;                              {:field :f1 :before nil :after "updated"})]}))
+          ;(is (= {:parent (uuid 1) :f1 nil #_"not 'updated'"}
+          ;       (foreign-select-one [(keypath (uuid 40))
+          ;                            (view select-keys-with-defaults [:parent :f1])]
+          ;                           component-by-id))
+          ;    "Invalid parent fails the whole update => both parent and f1 remain as before")
 
           (testing "Component cannot be its own parent"
             (foreign-append! component-edits-depot

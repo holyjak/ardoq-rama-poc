@@ -97,7 +97,7 @@
                         *component))
 
       ;; UPDATES
-      (source> *component-edits :> {:keys [*_id *edits]})
+      (source> *component-edits :> {:keys [*_id *edits] :as *UPD})
       (edits->before+after *edits :> [*before *after])
       (local-select> [(keypath *_id) (view some-select-keys (keys *before))] $$component-by-id :> *existing-raw)
       (identity (merge (zipmap (keys *before) (repeat nil)) *existing-raw) :> *existing) ; *bef. may have {:k nil} while *ex. may omit the key, for us both cases =
@@ -119,7 +119,8 @@
                       :data *parent-error})
 
         (default>)
-        (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id))
+        (local-transform> [(keypath *_id) (submap (keys *after)) (termval *after)] $$component-by-id)
+        (ack-return> :OK))
 
       ;; DELETES TODO: Also children, later refs
       ;; Idempotent: If the entity doesn't exist, nothing happens

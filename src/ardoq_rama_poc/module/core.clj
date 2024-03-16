@@ -75,15 +75,22 @@
     (declare-pstate s $$component-by-id {UUID (map-schema Keyword Object)}) ; see also fixed-keys-schema
     (declare-pstate s $$children {UUID #{UUID}}) ; no need for subindexed, don't expect more than 10s
 
-    (<<query-topology topologies "ancestors"
+    (<<query-topology topologies "ancestors" ;; TODO May be simpler with a recursive, 1-child->parent topo?
       [*children :> *child->ancestors]
+      (|hash (first *children)) ; "leading partitioner" - an optimization for when we only have 1 child input
       (ops/explode *children :> *child)
-      (select> [(keypath *child :parent)] $$component-by-id :> *parent)
-      (ifexpr *parent
-              [*parent]
-              :> *ancestors)
-      (identity {*child *ancestors} :> *child->ancestors)
-      (|origin))
+      (loop<- [*child *child, *ancestors [] :> *ancestors]
+        (select> [(keypath *child :parent)] $$component-by-id :> *parent)
+        (<<if *parent
+          (conj *ancestors *parent :> *ancestors)
+          (continue> *parent *ancestors)
+          (else>)
+          (:> *ancestors)))
+      ; TODO Could I rewrite this somehow with the loop emitting each parent, and aggs/+vec-agg to collect them?
+      ;(identity {*child (not-empty *ancestors)} :> *child->ancestors)
+      ; Note: This ☝️ works, but only for single input - otherwise 'multiple query outputs' error => need the map-agg below
+      (|origin)
+      (aggs/+map-agg *child (not-empty *ancestors) :> *child->ancestors))
 
     (<<sources s
       ;;

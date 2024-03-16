@@ -151,9 +151,9 @@
 
     (let [component-depot (foreign-depot ipc (get-module-name ArdoqCore) "*component-depot")
           ancestors (foreign-query ipc (get-module-name ArdoqCore) "ancestors")
-          grandparent (sut/->comp {:_id (uuid 0) :name "zeroth" :f1 1, :f2 true, :f3 nil})
-          parent (sut/->comp {:_id (uuid 1) :parent (uuid 0) :name "first" :f1 1, :f2 true, :f3 nil})
-          child (sut/->comp {:_id (uuid 2) :parent (uuid 1) :name "child"})]
+          grandparent (sut/->comp {:_id (uuid 0)})
+          parent (sut/->comp {:_id (uuid 1) :parent (uuid 0)})
+          child (sut/->comp {:_id (uuid 2) :parent (uuid 1)})]
       (foreign-append! component-depot grandparent)
       (foreign-append! component-depot parent)
       (foreign-append! component-depot child)
@@ -163,12 +163,29 @@
               (foreign-invoke-query ancestors [(:_id parent)]))))
 
       (testing "multi-level: child -> parent -> grandparent"
-       (is (= {(:_id child) (map :_id [parent grandparent])} ; FIXME implement the code
+       (is (= {(:_id child) (map :_id [parent grandparent])}
               (foreign-invoke-query ancestors [(:_id child)]))))
 
       (testing "0 level - a parent-less component"
         (is (= {(:_id grandparent) nil}
-               (foreign-invoke-query ancestors [(:_id grandparent)]))))))
+               (foreign-invoke-query ancestors [(:_id grandparent)]))))
+
+      (let [ids [10 11 12 13]]
+        (->> (map (fn [id parent] (sut/->comp {:_id (uuid id) :parent (some-> parent uuid)}))
+                  ids (cons nil ids))
+             (run! (partial foreign-append! component-depot)))
+        (testing "multi-level - another chain (13 -> .. -> 10)"
+          (is (= {(uuid 13) (map uuid (next (reverse ids)))}
+                 (foreign-invoke-query ancestors [(uuid 13)]))))
+
+        (testing "multiple inputs & outputs"
+          (is (= {(uuid 13) (map uuid [12 11 10])
+                  (uuid 12) (map uuid [11 10])
+                  (uuid 11) (map uuid [10])
+                  (uuid 10) nil
+                  (:_id child) (map :_id [parent grandparent])}
+                 (foreign-invoke-query ancestors [(uuid 13) (uuid 12)
+                                                  (uuid 11) (uuid 10) (:_id child)])))))))
 
   (deftest parent-test
     (with-open [ipc (rtest/create-ipc)]

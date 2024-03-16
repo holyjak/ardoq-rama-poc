@@ -57,6 +57,9 @@
      [case> (seg# = '*parent# (seg# get component :_id))]
      [identity {:error "Can't be ones own parent" :data {:parent '*parent#}} :> maybe-error]
 
+     ;; FIXME check for ancestor loop
+     ;[identity {:error "Ancestor loop" :data {:parent '*parent#}} :> maybe-error]
+
      [default>]
      [identity nil :> maybe-error]]]])
 
@@ -71,6 +74,12 @@
   (let [s (stream-topology topologies "component")]
     (declare-pstate s $$component-by-id {UUID (map-schema Keyword Object)}) ; see also fixed-keys-schema
     (declare-pstate s $$children {UUID #{UUID}}) ; no need for subindexed, don't expect more than 10s
+
+    (<<query-topology topologies "ancestors"
+      [*children :> *child->ancestors]
+      (count *children :> *child->ancestors)
+      (|origin))
+
     (<<sources s
       ;;
       ;; CREATES

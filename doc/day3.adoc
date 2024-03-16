@@ -1,4 +1,5 @@
 = Learning Rama: Day 3 - foreign keys and data integrity
+:docs: https://redplanetlabs.com/docs/~/
 
 The adventure continues! In the xref:./day2.adoc[previous installment], I have created a simple C\(R)UD for "components". Today, we will spice it up and add a foreign key and data integrity maintenance. Namely, a component can have a parent, which can also have a parent, etc. I will implement two features:
 
@@ -9,9 +10,9 @@ The adventure continues! In the xref:./day2.adoc[previous installment], I have c
  * Likely, I need to check for children upon delete (could have got some while the deletion was issued)
  * Should I check that it hasn't got any new descendants since a user approved the deletion? Or perhaps we should delete all approved and new anyway? Or support a `force` option to delete also potential new descendants without approval?
 
-== Design
+== Core design
 
-I already have `id -> component` PState and likely would want a `comp-id -> #{children IDs}` one. Rama by default pre-computes the length of sub-indexed subsequences, which would be helpful for `has-children?`, if I want to subindex it (i.e. if it is expected to tend to have over 100 elements - which I don't think is the case, though it could happen occasionally.) I could also maintain another PState, `comp-id -> count-of-children`... . Though not sure count of children is actually ever interesting. Count of all descendants could be, but that would also be more expensive to maintain. A simple has-chldren? might be enough.
+I already have `id -> component` PState and likely would want a `comp-id -> #{children IDs}` one. Rama by default pre-computes the length of sub-indexed subsequences, which would be helpful for `has-children?`, if I want to subindex it (i.e. if it is expected to tend to have over 100 elements - which I don't think is the case, though it could happen occasionally.) I could also maintain another PState, `comp-id -> count-of-children`... . Though not sure count of children is actually ever interesting. Count of all descendants could be, but that would also be more expensive to maintain. A simple has-children? might be enough.
 
 IMO subindexing doesn't make sense here - I expect far only units or 10s of children on average, and mostly I will want to read all of them anyway. It could be interesting to store the parent-child relationship as a tree, though I don't think that is possible (since I'd essentially need a recursive schema). I guess I could cheat and use `(map-schema String clojure.lang.PersistentArrayMap)` or something, but updating it might be expensive, and finding a particular place in the tree (i.e. the subtree for a particular descendant) would be inefficient, requiring the whole root component's tree to be read.
 
@@ -23,14 +24,16 @@ Calculating descendant subtree - is Rama smart enough to do this efficiently, i.
 
 === Questions explored
 
-* How to create a conditional sub-tree of computation? (the parent check)
-* How to return early from the topology when the input is invalid?
-* How to check for existence? A: (https://clojurians.slack.com/archives/C05N2M7R6DB/p1709681282921649?thread_ts=1709673534.904289&cid=C05N2M7R6DB[thx, Nathan!]): use `(view ...)` as the whole path: `(local-select> (view contains? :x) ++ps :> *present?)`
-** BEWARE: This doesn't work with `select>` b/c it wouldn't know what to partition to (it needs a `(keypath ...)` for that, I assume). So I need to manually use `|hash + local-select>`.
-** NOTE: `local-select>` w/ `keypath` returns `nil` upon no match, so I can do `(<<if *the-result ....)` later on.
-* How to select on a potentially different partition and then come back? A: `select>` then `(|hash ...)`.
-* How do I add an element to a (possibly nonexistent) set? A: `(local-transform> [(keypath *parent) NONE-ELEM (termval *comp-id)] ++children)`
-* Reusability: how to make a `valid-parent?` fragment that I could use both in the create and update flows?
+. How to create a conditional sub-tree of computation? (I.e. if the input has `:parent`, go and check it)
+. How to return early from the topology when the input is invalid? (E.g. the provided parent id does not exist.)
+. How to check for existence? (I.e. "Does the given parent to be set actually exist?") A: (https://clojurians.slack.com/archives/C05N2M7R6DB/p1709681282921649?thread_ts=1709673534.904289&cid=C05N2M7R6DB[thx, Nathan!]): use `(view ...)` as the whole path: `(local-select> (view contains? :x) ++ps :> *present?)`
+ * BEWARE: This doesn't work with `select>` b/c it wouldn't know what to partition to (it needs a `(keypath ...)` for that, I assume). So I need to manually use `|hash + local-select>`.
+ * NOTE: `local-select>` w/ `keypath` returns `nil` upon no match, so I can do `(<<if *the-result ....)` later on.
+. How to select on a potentially different partition and then come back? A: `select>` then `(|hash ...)`.
+. How do I add an element to a (possibly nonexistent) set? A: `(local-transform> [(keypath *parent) NONE-ELEM (termval *comp-id)] ++children)`
+. _Transactional update across multiple partitions_ - see below
+. Reusability: how to make a `valid-parent?` fragment that I could use both in the create and update flows?
+. _Query topologies_ - creating them and using them in ETLs (to perform data validity checks) - see below
 
 === Tidbits
 
@@ -42,7 +45,7 @@ Calculating descendant subtree - is Rama smart enough to do this efficiently, i.
 
 Topologies are triggered by depot appends. Rama guarantees that appends to a particular partition of a particular depot will be processed in the order of arrival. Appends to different partitions or to different depots that map to the same partition (node) do not have any such guarantee.
 
-A single depot append may link:pass:[https://redplanetlabs.com/docs/~/stream.html#_operation][result in a tree of _events_] and is only processed when they all finish successfully. link:pass:[https://redplanetlabs.com/docs/~/intermediate-dataflow.html#_yieldifovertime][What is an event]? It is all the code in between two _async boundaries_: "`An async boundary is where code moves to another task, or where a remote operation is performed. Async boundaries in Rama [.line-through]#can be# _is one of_ partitioners, localSelect calls on mirror PStates, or https://redplanetlabs.com/docs/~/integrating.html[calls to external queues or databases].`"
+A single depot append may link:{docs}+stream.html#_operation+[result in a tree of _events_] and is only processed when they all finish successfully. link:{docs}+intermediate-dataflow.html#_yieldifovertime+[What is an event]? It is all the code in between two _async boundaries_: "`An async boundary is where code moves to another task, or where a remote operation is performed. Async boundaries in Rama [.line-through]#can be# _is one of_ partitioners, localSelect calls on mirror PStates, or https://redplanetlabs.com/docs/~/integrating.html[calls to external queues or databases].`"
 
 All writes within a single event are atomic - i.e. all writes to any number of PStates (remember, on the same partition) are made visible at the same time. At least for stream topologies - in microbatching, every PState update across all partitions is atomic.
 
@@ -71,13 +74,13 @@ As Nathan pointed out, every PState update across all partitions is transactiona
 
 > A microbatch iteration can take anywhere from a couple hundred milliseconds to many seconds, depending on the complexity of processing and the amount of incoming data.
 >
-> -- link:pass:[https://redplanetlabs.com/docs/~/tutorial5.html#_microbatch_topologies][Tutorial: Microbatch topologies]
+> -- link:{docs}+tutorial5.html#_microbatch_topologies+[Tutorial: Microbatch topologies]
 
-(I assume this link:pass:[https://redplanetlabs.com/docs/~/microbatch.html#_tuning_options][can be tuned] with options such as `depot.microbatch.max.records`.)
+(I assume this link:{docs}+microbatch.html#_tuning_options+[can be tuned] with options such as `depot.microbatch.max.records`.)
 
-> They [microbatch topologies] have significant additional capabilities for expressing computations [such as link:pass:[https://redplanetlabs.com/docs/~/intermediate-dataflow.html#_batch_blocks][batch blocks]], different performance characteristics, and simple exactly-once fault-tolerance semantics. [I.e. an all-or-nothing atomicity.]
+> They [microbatch topologies] have significant additional capabilities for expressing computations [such as link:{docs}+intermediate-dataflow.html#_batch_blocks+[batch blocks]], different performance characteristics, and simple exactly-once fault-tolerance semantics. [I.e. an all-or-nothing atomicity.]
 
-As link:pass:[https://redplanetlabs.com/docs/~/microbatch.html#_operation_and_fault_tolerance][microbatch operation explains]:
+As link:{docs}+microbatch.html#_operation_and_fault_tolerance+[microbatch operation explains]:
 
 > This means all changes to all PStates on a task in a microbatch become visible at the exact same time (though changes on different tasks [~ machines] may become visible at slightly different times).
 
@@ -101,7 +104,7 @@ Let's (artificially) assume that component creation needs very short response ti
 
 .Stream topologies must be retriable
 ****
-Any part of a distributed computation such as a stream topology may fail. Rama link:pass:[https://redplanetlabs.com/docs/~/stream.html#_fault_tolerance_and_retry_modes][solves that by retrying] such a topology from scratch. Therefore the topology must be idempotent, i.e. it must be safe to run it multiple times, and it must be able to pick up from where it failed. This implies that we must modify data in the right order. In my case, when deleting a parent, I may only delete the `$$parent->children` entry after the successful deletion of all the children. (And make sure that an attempt to delete a deleted child does nothing.)
+Any part of a distributed computation such as a stream topology may fail. Rama link:{docs}+stream.html#_fault_tolerance_and_retry_modes+[solves that by retrying] such a topology from scratch. Therefore the topology must be idempotent, i.e. it must be safe to run it multiple times, and it must be able to pick up from where it failed. This implies that we must modify data in the right order. In my case, when deleting a parent, I may only delete the `$$parent->children` entry after the successful deletion of all the children. (And make sure that an attempt to delete a deleted child does nothing.)
 ****
 
 ==== Open questions
@@ -110,7 +113,7 @@ How to test different "interleavings" of events, to make sure I never get into a
 
 === Code reuse: deframafn vs. segmacro
 
-I wanted to factor out `parent-error` to check whether component's `:parent` exists, if provided. But I learned I cannot use deframafn / deframaop for that because neither may contain partitioners. The solution is to use the inline `<<ramafn`, which did not fit here, or a link:pass:[https://redplanetlabs.com/docs/~/clj-dataflow-lang.html#_segmacros][segmacro].
+I wanted to factor out `parent-error` to check whether component's `:parent` exists, if provided. But I learned I cannot use deframafn / deframaop for that because neither may contain partitioners. The solution is to use the inline `<<ramafn`, which did not fit here, or a link:{docs}+clj-dataflow-lang.html#_segmacros+[segmacro].
 
 Pitfalls I encountered:
 
@@ -120,9 +123,21 @@ Pitfalls I encountered:
 
 Many thanks to Nathan for all the help!
 
+=== Query topologies
+
+Goal: When setting a parent, check that it won't create a loop in the hierarchy.
+
+Extended goal: Give a child id, return the chain of its ancestors, starting with its parent. Given the capabilities of Rama, it should be simple, if not trivial, to compute ancestor chains for any number of children in parallel. I've actually decided to start with this, because it is interesting and creating a simpler version of the original need should then be simple.
+
+Off to re-read link:{docs}+clj-defining-modules.html#_declaring_query_topologies+[Query topologies]! (Well, right after I refactor all links in this document with help of Asciidoc attributes, and find out how to make Vivaldi force RPL docs into dark mode 😅)
+
+Idea: Use a temporary PState or something similar with input-child-id -> ancestors. After each step, come back to the input id's partition and append the new ancestor. Return the PState value as the output.
+
+**WIP**
+
 === Tip: One entity = one depot
 
-I've started by having 3 separate depots for Component Create, Update, and Delete operations, b/c that is what I saw in some of the examples. However it seems cleaner to me to have just a single one, as it will then provide a single source of truth of the entity. https://clojurians.slack.com/archives/C05N2M7R6DB/p1709945183106729[Nathan approves]:
+I've started by having 3 separate depots for Component Create, Update, and Delete operations, b/c that is what I saw in some of the examples. However, it seems cleaner to me to have just a single one, as it will then provide a single source of truth of the entity. https://clojurians.slack.com/archives/C05N2M7R6DB/p1709945183106729[Nathan approves]:
 
 > yes, in general it's better to have the same entity managed through the same depot, particularly updates and deletes.
 > Putting creates and updates on different depots usually won't have ordering problems because in most apps you can't update or delete something until it's been created

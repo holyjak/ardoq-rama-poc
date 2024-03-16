@@ -158,8 +158,17 @@
       (foreign-append! component-depot parent)
       (foreign-append! component-depot child)
 
-      (is (= {(:_id child) (map :_id [parent grandparent])} ; FIXME implement the code
-             (foreign-invoke-query ancestors [(:_id child)])))))
+      (testing "single level: parent -> grandparent"
+       (is (= {(:_id parent) [(:_id grandparent)]}
+              (foreign-invoke-query ancestors [(:_id parent)]))))
+
+      (testing "multi-level: child -> parent -> grandparent"
+       (is (= {(:_id child) (map :_id [parent grandparent])} ; FIXME implement the code
+              (foreign-invoke-query ancestors [(:_id child)]))))
+
+      (testing "0 level - a parent-less component"
+        (is (= {(:_id grandparent) nil}
+               (foreign-invoke-query ancestors [(:_id grandparent)]))))))
 
   (deftest parent-test
     (with-open [ipc (rtest/create-ipc)]

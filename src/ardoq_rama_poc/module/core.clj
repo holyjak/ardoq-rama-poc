@@ -77,7 +77,12 @@
 
     (<<query-topology topologies "ancestors"
       [*children :> *child->ancestors]
-      (count *children :> *child->ancestors)
+      (ops/explode *children :> *child)
+      (select> [(keypath *child :parent)] $$component-by-id :> *parent)
+      (ifexpr *parent
+              [*parent]
+              :> *ancestors)
+      (identity {*child *ancestors} :> *child->ancestors)
       (|origin))
 
     (<<sources s

@@ -132,14 +132,15 @@ Extended goal: Give a child id, return the chain of its ancestors, starting with
 
 Off to re-read link:{docs}+clj-defining-modules.html#_declaring_query_topologies+[Query topologies]! (Well, right after I refactor all links in this document with help of Asciidoc attributes, and find out how to make Vivaldi force RPL docs into dark mode 😅)
 
-Idea: Use a temporary PState or something similar with input-child-id -> ancestors. After each step, come back to the input id's partition and append the new ancestor. Return the PState value as the output.
+[.line-through]#Idea: Use a temporary PState or something similar with input-child-id -> ancestors. After each step, come back to the input id's partition and append the new ancestor. Return the PState value as the output.#
 
 Learnings:
 
 * Define, remotely invoke a query topology
 * Do not confuse `local-select>` and `select>`, it is the latter that does change partition 😅
 * How to use `loop<-`
-* I have quite struggled with writing the code to collect all the ancestors. I've ended up with a DIY solution where the loop passes an accumulator around and only emits once it is done. I would have preferred to emit every parent found from the loop, and use something like `aggs/+vec-agg` to collect them, but couldn't figure out how to. It also took a while to figure out that I first need to go back to the origin partition and then use `aggs/+map-agg` to combine all the child + its ancestors pair into a single output map. (I originally had `(identity {*child (not-empty *ancestors)} :> *child->ancestors)` prior to that, but that emitted a single-element map for each child, while queries must produce exactly one output.)
+* I have quite struggled with writing the code to collect all the ancestors. I've ended up with a DIY solution where the loop passes an accumulator around and only emits once it is done. I would have preferred to emit every parent found from the loop, and use something like `aggs/+vec-agg` to collect them, but couldn't figure out how to (Nathan has later demonstrated it, but it loses ordering). It also took a while to figure out that I first need to go back to the origin partition and then use `aggs/+map-agg` to combine all the child + its ancestors pair into a single output map. (I originally had `(identity {*child (not-empty *ancestors)} :> *child->ancestors)` prior to that, but that emitted a single-element map for each child, while queries must produce exactly one output.)
+* After I implemented the `ancestors` query returning a components ancestors, I wrote `ancestor?` for checking whether a component is an ancestor of another from scratch, using a recursive query, as this was much simpler.
 
 Other ideas considered:
 

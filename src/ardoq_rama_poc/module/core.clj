@@ -44,24 +44,23 @@
 
 (defbasicblocksegmacro parent-error [component component-by-id :> maybe-error]
   [[get component :parent :> '*parent#] ; notice keywords can't be used as fns in here :'( => get
+   [get component :_id :> '*self#]
    [<<if (seg# not '*parent#)
     [identity nil :> maybe-error]
     [else>]
     [|hash '*parent#] ; I'm using a partitioner => can't use ramafn, need a segmacro
     [local-select> (seg# view contains? '*parent#) component-by-id :> '*parent-exists?#]
-    [|hash (seg# get component :_id)] ; come back to the original partition
+    [|hash '*self#] ; come back to the original partition
     [<<cond
      [case> (seg# not '*parent-exists?#)]
      [identity {:error "The parent entity does not exist" :data {:parent '*parent#}} :> maybe-error]
 
-     [case> (seg# = '*parent# (seg# get component :_id))]
+     [case> (seg# = '*parent# '*self#)]
      [identity {:error "Can't be ones own parent" :data {:parent '*parent#}} :> maybe-error]
 
-     ;; FIXME check for ancestor loop
-     ;[identity {:error "Ancestor loop" :data {:parent '*parent#}} :> maybe-error]
-
      [default>]
-     [identity nil :> maybe-error]]]])
+     [invoke-query "ancestor?" '*self# '*parent# :> '*loop?#]
+     [ifexpr '*loop?# {:error "Ancestor loop" :data {:parent '*parent#}} :> maybe-error]]]])
 
 ;; DONE:
 ;; 1. Basic create-update-delete for "components", where updates have compare-and-set semantics

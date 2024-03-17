@@ -297,9 +297,7 @@
                                                  {:field :parent :before nil :after (:_id child)})]}))))
             (is (= nil
                    (foreign-select-one [(keypath (:_id grandparent1) :parent)] component-by-id))
-                "The update should have failed, and :parent remained as-was, i.e. none")
-            )
-          ))
+                "The update should have failed, and :parent remained as-was, i.e. none"))))
       (testing "cascading delete"
         ;; TODO
         ))))

@@ -144,7 +144,6 @@
   (merge (zipmap ks (repeat nil))
          (select-keys m ks)))
 
-#_
 (deftest query-ancestor?-test
   (with-open [ipc (rtest/create-ipc)]
     (rtest/launch-module! ipc ArdoqCore {:tasks 4 :threads 2})
@@ -155,14 +154,23 @@
       (->> (map (fn [id parent] (sut/->comp {:_id (uuid id) :parent (some-> parent uuid)}))
                 ids (cons nil ids))
            (run! (partial foreign-append! component-depot)))
-      (is (ancestor? (uuid 11) (uuid 10))) #_ ; FIXME
+
+      (is (foreign-invoke-query ancestor? (uuid 10) (uuid 11)))
+      (is (foreign-invoke-query ancestor? (uuid 10) (uuid 12)))
+      (is (foreign-invoke-query ancestor? (uuid 11) (uuid 12)))
+      (is (not (foreign-invoke-query ancestor? (uuid 11) (uuid 10))))
+      (is (not (foreign-invoke-query ancestor? (uuid 12) (uuid 10))))
+      (is (not (foreign-invoke-query ancestor? (uuid 12) (uuid 11))))
+
       (doall
         (for [needle ids
               child ids]
-          (is (= (> needle child)
-                 (ancestor? (uuid needle) (uuid child)))
-              (format "Expected %s to be an ancestor of %s, given ancestor chain %s"
-                      needle child ids)))))))
+          (is (= (< needle child)
+                 (foreign-invoke-query ancestor? (uuid needle) (uuid child)))
+              (format "Expected %d %s to be an ancestor of %d, given ancestor chain %s"
+                      needle
+                      (if (< needle child) "" "NOT")
+                      child ids)))))))
 
 (deftest query-ancestors-test
   (with-open [ipc (rtest/create-ipc)]

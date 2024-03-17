@@ -77,23 +77,21 @@
 
     (<<query-topology topologies "ancestor?"
       [*needle *child :> *ancestor?]
-      ;(|hash *child)
-      ;(local-select> [(keypath *child :parent)] $$component-by-id :> *parent)
-      ;(<<cond
-      ;  (case> (nil? *parent))
-      ;  (identity false :> *ancestor?)
-      ;
-      ;  (case> (= *needle *parent))
-      ;  (identity true :> *ancestor?)
-      ;
-      ;  (else>)
-      ;  (invoke-query "ancestor?" *needle *parent :> *ancestor?))
-      (|origin)
-      (identity false :> *ancestor?))
+      (|hash *child)
+      (local-select> [(keypath *child :parent)] $$component-by-id :> *parent)
+      (<<cond
+        (case> (nil? *parent))
+        (identity false :> *ancestor?)
+
+        (case> (= *needle *parent))
+        (identity true :> *ancestor?)
+
+        (default>)
+        (invoke-query "ancestor?" *needle *parent :> *ancestor?))
+      (|origin))
 
     (<<query-topology topologies "ancestors" ;; TODO May be simpler with a recursive, 1-child->parent topo?
       [*children :> *child->ancestors]
-      (|hash (first *children)) ; "leading partitioner" - an optimization for when we only have 1 child input
       (ops/explode *children :> *child)
       (loop<- [*child *child, *ancestors [] :> *ancestors]
         (select> [(keypath *child :parent)] $$component-by-id :> *parent)

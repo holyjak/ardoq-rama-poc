@@ -146,6 +146,22 @@ Other ideas considered:
 * Leverage link:{docs}+query.html#_temporary_in_memory_state_for_query_topologies+[Temporary in-memory state for query topologies] to collect the output
 * Use a helper, recursive query topology instead of the loop
 
+If the order of ancestors wasn't important (it is), then Nathan suggested the following neat solution (notice the loop emits each parent, and we use a compound aggregation on the origin partition):
+
+[source,clojure]
+----
+(<<query-topology topologies "ancestors"
+  [*children :> *child->ancestors]
+  (ops/explode *children :> *child)
+  (loop<- [*child *child :> *ancestor]
+    (select> [(keypath *child :parent)] $$component-by-id :> *parent)
+    (<<if *parent
+      (:> *parent)    
+      (continue> *parent)))
+  (|origin)
+  (+compound {*child (aggs/+vec-agg *ancestor)} :> *child->ancestors))
+----
+
 === Tip: One entity = one depot
 
 I've started by having 3 separate depots for Component Create, Update, and Delete operations, b/c that is what I saw in some of the examples. However, it seems cleaner to me to have just a single one, as it will then provide a single source of truth of the entity. https://clojurians.slack.com/archives/C05N2M7R6DB/p1709945183106729[Nathan approves]:

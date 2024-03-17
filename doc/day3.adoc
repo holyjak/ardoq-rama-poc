@@ -137,15 +137,13 @@ Learnings:
 
 * Define, remotely invoke a query topology
 * Do not confuse `local-select>` and `select>`, it is the latter that does change partition 😅
-* Use `loop<-`
-* I have quite struggled with writing the code to collect all the ancestors. I've ended up with a DIY solution where the loop passes an accumulator around and only emits once it is done. I would have preferred to emit every parent found from the loop, and use something like `aggs/+vec-agg` to collect them, but couldn't figure out how to.
+* How to use `loop<-`
+* I have quite struggled with writing the code to collect all the ancestors. I've ended up with a DIY solution where the loop passes an accumulator around and only emits once it is done. I would have preferred to emit every parent found from the loop, and use something like `aggs/+vec-agg` to collect them, but couldn't figure out how to. It also took a while to figure out that I first need to go back to the origin partition and then use `aggs/+map-agg` to combine all the child + its ancestors pair into a single output map. (I originally had `(identity {*child (not-empty *ancestors)} :> *child->ancestors)` prior to that, but that emitted a single-element map for each child, while queries must produce exactly one output.)
 
-Open questions/ideas
+Other ideas considered:
 
-* Leverage link:{docs}+query.html#_temporary_in_memory_state_for_query_topologies+[Temporary in-memory state for query topologies]
-* Leverage a helper, recursive query topology
-
-**WIP**
+* Leverage link:{docs}+query.html#_temporary_in_memory_state_for_query_topologies+[Temporary in-memory state for query topologies] to collect the output
+* Use a helper, recursive query topology instead of the loop
 
 === Tip: One entity = one depot
 

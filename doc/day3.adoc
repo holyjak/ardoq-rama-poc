@@ -38,6 +38,7 @@ Calculating descendant subtree - is Rama smart enough to do this efficiently, i.
 === Tidbits
 
 * `ifexpr` can be used with `:>` and a missing then-branch will produce `nil`, just like in clj: `(ifexpr false "..." :> *error) ; *error is nil`
+* link:{docs}+clj-dataflow-lang.html#_loops+[From the docs]: "`[..] the body [of a loop] can call `continue>` multiple times in one iteration. An example use case where this comes up is a query topology doing a parallel graph search, where each iteration of the loop continues along all outgoing edges.`" This sounds very powerful, compared to ordinary Clojure...
 
 === Transactional update across multiple partitions
 

@@ -75,6 +75,22 @@
     (declare-pstate s $$component-by-id {UUID (map-schema Keyword Object)}) ; see also fixed-keys-schema
     (declare-pstate s $$children {UUID #{UUID}}) ; no need for subindexed, don't expect more than 10s
 
+    (<<query-topology topologies "ancestor?"
+      [*needle *child :> *ancestor?]
+      ;(|hash *child)
+      ;(local-select> [(keypath *child :parent)] $$component-by-id :> *parent)
+      ;(<<cond
+      ;  (case> (nil? *parent))
+      ;  (identity false :> *ancestor?)
+      ;
+      ;  (case> (= *needle *parent))
+      ;  (identity true :> *ancestor?)
+      ;
+      ;  (else>)
+      ;  (invoke-query "ancestor?" *needle *parent :> *ancestor?))
+      (|origin)
+      (identity false :> *ancestor?))
+
     (<<query-topology topologies "ancestors" ;; TODO May be simpler with a recursive, 1-child->parent topo?
       [*children :> *child->ancestors]
       (|hash (first *children)) ; "leading partitioner" - an optimization for when we only have 1 child input

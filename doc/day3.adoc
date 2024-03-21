@@ -1,14 +1,16 @@
-= Learning Rama: Day 3 - foreign keys and data integrity
+= Learning Rama: Day 3: Foreign keys and data integrity, macros, queries
 :docs: https://redplanetlabs.com/docs/~/
 
 The adventure continues! In the xref:./day2.adoc[previous installment], I have created a simple C\(R)UD for "components". Today, we will spice it up and add a foreign key and data integrity maintenance. Namely, a component can have a parent, which can also have a parent, etc. I will implement two features:
 
-. Ensuring that `parent` is a valid component ID when creating or updating the value
-. A query to retrieve the full hierarchy of a component's descendants (so that it can be checked prior to a delete operation)
- * I may want to have a computed property `has-children?` to know whether to check for descendants
-. When deleting a parent component, deleting the whole hierarchy of its descendants
+. Ensuring that `parent` is a valid component ID when creating or updating the value (it exists, there is no cycle)
+. A query to retrieve the full hierarchy of a component's [.line-through]#descendants# _ancestors_
+ * I may want to have a [.line-through]#computed property `has-children?` to know whether to check for descendants# _helper PState, ``$$children``_
+. [.line-through]#When deleting a parent component, deleting the whole hierarchy of its descendants# _TBD later_
  * Likely, I need to check for children upon delete (could have got some while the deletion was issued)
  * Should I check that it hasn't got any new descendants since a user approved the deletion? Or perhaps we should delete all approved and new anyway? Or support a `force` option to delete also potential new descendants without approval?
+
+I learn about https://blog.jakubholy.net/2024/rama-transactions/[transactional updates], about writing query topologies, and about code reuse with Rama segmacros. As usually, I excel at running into problems we can all learn from 😅.
 
 == Core design
 
@@ -26,12 +28,11 @@ Calculating descendant subtree - is Rama smart enough to do this efficiently, i.
 
 . How to create a conditional sub-tree of computation? (I.e. if the input has `:parent`, go and check it)
 . How to return early from the topology when the input is invalid? (E.g. the provided parent id does not exist.)
-. How to check for existence? (I.e. "Does the given parent to be set actually exist?") A: (https://clojurians.slack.com/archives/C05N2M7R6DB/p1709681282921649?thread_ts=1709673534.904289&cid=C05N2M7R6DB[thx, Nathan!]): use `(view ...)` as the whole path: `(local-select> (view contains? :x) ++ps :> *present?)`
- * BEWARE: This doesn't work with `select>` b/c it wouldn't know what to partition to (it needs a `(keypath ...)` for that, I assume). So I need to manually use `|hash + local-select>`.
- * NOTE: `local-select>` w/ `keypath` returns `nil` upon no match, so I can do `(<<if *the-result ....)` later on.
-. How to select on a potentially different partition and then come back? A: `select>` then `(|hash ...)`.
-. How do I add an element to a (possibly nonexistent) set? A: `(local-transform> [(keypath *parent) NONE-ELEM (termval *comp-id)] ++children)`
-. _Transactional update across multiple partitions_ - see below
+. How to check for existence? (I.e. "Does the given parent to be set actually exist?") A: (https://clojurians.slack.com/archives/C05N2M7R6DB/p1709681282921649?thread_ts=1709673534.904289&cid=C05N2M7R6DB[thx, Nathan!]): use `(view ...)` as the whole path: `(local-select> (view contains? :x) $$ps :> *present?)`
+ * BEWARE: This doesn't work with `select>` b/c it wouldn't know what to partition to (it needs a `(keypath ...)` for that, I assume). So I need to manually use `|hash` + `local-select>`.
+ * NOTE: `local-select>` with `keypath` returns `nil` upon no match (while with `must` it would not emit at all), so I can do `(<<if *the-result ....)` later on.
+. How to select on a potentially different partition and then come back? A: `select>` to go there and access data, then `(|hash ...)` to come back.
+. How do I add an element to a (possibly nonexistent) set? A: `(local-transform> [(keypath *parent) NONE-ELEM (termval *comp-id)] $$children)`
 . Reusability: how to make a `valid-parent?` fragment that I could use both in the create and update flows?
 . _Query topologies_ - creating them and using them in ETLs (to perform data validity checks) - see below
 
@@ -124,11 +125,44 @@ Pitfalls I encountered:
 
 Many thanks to Nathan for all the help!
 
+Here is the code:
+
+.Segmacro for checking parent for validity, if set
+[source,clojure]
+----
+(defbasicblocksegmacro parent-error 
+  "Check the parent exists and that there is no loop in the hierarchy, return
+  error data if not."
+  [component component-by-id :> maybe-error] ; args
+  [[get component :parent             ; <1>
+     :> '*parent#]                    ; <2>
+   [get component :_id :> '*self#]
+   [<<if (seg# not '*parent#)         ; <3>
+    [identity nil :> maybe-error]
+    [else>]
+    [|hash '*parent#] ; I'm using a partitioner => can't use ramafn, need a segmacro
+    [local-select> (seg# view contains? '*parent#) component-by-id :> '*parent-exists?#]
+    [|hash '*self#] ; come back to the original partition
+    [<<cond
+     [case> (seg# not '*parent-exists?#)]
+     [identity {:error "The parent entity does not exist" :data {:parent '*parent#}} :> maybe-error]
+
+     [case> (seg# = '*parent# '*self#)]
+     [identity {:error "Can't be ones own parent" :data {:parent '*parent#}} :> maybe-error]
+
+     [default>]
+     [invoke-query "ancestor?" '*self# '*parent# :> '*loop?#]
+     [ifexpr '*loop?# {:error "Ancestor loop" :data {:parent '*parent#}} :> maybe-error]]]])
+----
+<1> Keywords can't be used as functions, need `get` instead. Notice that segmacros use return code as data, that's why we see `[` instead of`(`.
+<2> Similarly to Clojure macros, we use `'*name#` to generate a unique Rama var (notice the leading quote and trailing hash)
+<3> The `[` segment vectors don't nest, with the exception of block expressions segments such as `<<if`. Nested expressions need to be "postponed" with `seg#`.
+
 === Query topologies
 
 Goal: When setting a parent, check that it won't create a loop in the hierarchy.
 
-Extended goal: Give a child id, return the chain of its ancestors, starting with its parent. Given the capabilities of Rama, it should be simple, if not trivial, to compute ancestor chains for any number of children in parallel. I've actually decided to start with this, because it is interesting and creating a simpler version of the original need should then be simple.
+Extended goal: Given a child id, return the chain of its ancestors, starting with its parent. Given the capabilities of Rama, it should be simple, if not trivial, to compute ancestor chains for any number of children in parallel. I've actually decided to start with this, because it is interesting and creating a simpler version of the original need should then be simple.
 
 Off to re-read link:{docs}+clj-defining-modules.html#_declaring_query_topologies+[Query topologies]! (Well, right after I refactor all links in this document with help of Asciidoc attributes, and find out how to make Vivaldi force RPL docs into dark mode 😅)
 
@@ -139,8 +173,8 @@ Learnings:
 * Define, remotely invoke a query topology
 * Do not confuse `local-select>` and `select>`, it is the latter that does change partition 😅
 * How to use `loop<-`
-* I have quite struggled with writing the code to collect all the ancestors. I've ended up with a DIY solution where the loop passes an accumulator around and only emits once it is done. I would have preferred to emit every parent found from the loop, and use something like `aggs/+vec-agg` to collect them, but couldn't figure out how to (Nathan has later demonstrated it, but it loses ordering). It also took a while to figure out that I first need to go back to the origin partition and then use `aggs/+map-agg` to combine all the child + its ancestors pair into a single output map. (I originally had `(identity {*child (not-empty *ancestors)} :> *child->ancestors)` prior to that, but that emitted a single-element map for each child, while queries must produce exactly one output.)
-* After I implemented the `ancestors` query returning a components ancestors, I wrote `ancestor?` for checking whether a component is an ancestor of another from scratch, using a recursive query, as this was much simpler.
+* I have quite struggled with writing the code to collect all the ancestors. I've ended up with a DIY solution where the loop passes an accumulator for the ancestors around and only emits once it is done. (Which is a good solution, according to Nathan.) I would have preferred to emit every parent found from the loop, and use something like `aggs/+vec-agg` to collect them, but couldn't figure out how to (Nathan has later demonstrated it, but it loses ordering). It also took a while to figure out that I first need to go back to the origin partition and then use `aggs/+map-agg` to combine all the child + its ancestors pairs into a single output map. (I originally had `(identity {*child (not-empty *ancestors)} :> *child->ancestors)` prior to that, but that emitted a single-element map for each child, while queries must produce exactly one output.)
+* After I implemented the `ancestors` query returning a components ancestors, I wrote `ancestor?`  from scratch, for checking whether a component is an ancestor of another one, using a recursive query, as this was much simpler.
 
 Other ideas considered:
 
@@ -149,6 +183,7 @@ Other ideas considered:
 
 If the order of ancestors wasn't important (it is), then Nathan suggested the following neat solution (notice the loop emits each parent, and we use a compound aggregation on the origin partition):
 
+.Unordered ancestors list query (Nathan)
 [source,clojure]
 ----
 (<<query-topology topologies "ancestors"
@@ -163,6 +198,44 @@ If the order of ancestors wasn't important (it is), then Nathan suggested the fo
   (+compound {*child (aggs/+vec-agg *ancestor)} :> *child->ancestors))
 ----
 
+.Ordered ancestors list query (me)
+[source,clojure]
+----
+(<<query-topology topologies "ancestors"
+  [*children :> *child->ancestors] ; input :> output
+  (ops/explode *children :> *child)
+  (loop<- [*child *child, *ancestors [] :> *ancestors] ; 2 vars, 1 output
+    (select> [(keypath *child :parent)] $$component-by-id :> *parent) ; <1>
+    (<<if *parent
+      (conj *ancestors *parent :> *ancestors)
+      (continue> *parent *ancestors)                                  ; <2>
+      (else>)
+      (:> *ancestors)))                                               ; <3>
+  (|origin)
+  (aggs/+map-agg *child (not-empty *ancestors) :> *child->ancestors))
+----
+<1> `select>` moves us to the child's partition and gets its parent
+<2> Dataflow's `recur`
+<3> Emit the whole vector as the sole output of the loop
+
+.Is `needle` an ancestor of `child`? (Recursive query)
+[source,clojure]
+----
+(<<query-topology topologies "ancestor?"
+  [*needle *child :> *ancestor?]
+  (|hash *child) ; <1>
+  (local-select> [(keypath *child :parent)] $$component-by-id :> *parent)
+  (<<cond
+    (case> (nil? *parent))
+    (identity false :> *ancestor?)  
+    (case> (= *needle *parent))
+    (identity true :> *ancestor?)  
+    (default>) ; we've a parent ≠ needle, recurse
+    (invoke-query "ancestor?" *needle *parent :> *ancestor?))
+  (|origin))
+----
+<1> The "Leading partitioner" query optimization => can't use `select>` but need to have explicitly a partitioner and then a local select.
+
 === Tip: One entity = one depot
 
 I've started by having 3 separate depots for Component Create, Update, and Delete operations, b/c that is what I saw in some of the examples. However, it seems cleaner to me to have just a single one, as it will then provide a single source of truth of the entity. https://clojurians.slack.com/archives/C05N2M7R6DB/p1709945183106729[Nathan approves]:
@@ -176,7 +249,7 @@ The `foreign-append!` docstring reads "`waits for data to be appended and replic
 
 === From the docs
 
-==== Dataflow lang in clj
+==== About Rama's Clojure Dataflow language
 
 [quote]
 ____
@@ -188,11 +261,17 @@ Dataflow code consists of a sequence of "segments", analogous to a "form" in Clo
 
 ;; output streams :>, :a>, and :b>
 (bar :a> <aaa> *v1 *v2 ; emit 2 fields to the stream a, anchor aaa
-:b> <anchor-b> *v2 ; emit a filed, anchor anchor-b
-:> *a) ; emit a field to the default stream
+  :b> <anchor-b> *v2 ; emit a field, anchor anchor-b
+  :> *a) ; emit a field to the default stream
 
 (println "Hello") ; 0 output declarations
 ----
 ____
 
 > A "variable" is a symbol beginning with `*`, `%`, or `pass:[$$]`. * signifies a value, % signifies an anonymous operation, and pass:[$$] signifies a PState.
+
+== Summary
+
+I've expanded my knowledge of Rama considerably, with queries, loops, segmacros, and a number of small learnings. The application can now manage the `:parent` foreign key, and return a list of ancestors for any number of children.
+
+Next time I'd like to finish this by deleting all descendants when a parent is deleted, and providing a query returning the count of descendants and a list of direct children.

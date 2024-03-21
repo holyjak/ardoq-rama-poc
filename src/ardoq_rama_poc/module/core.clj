@@ -42,7 +42,10 @@
 (defn some-select-keys [m ks]
   (some-> m (select-keys ks)))
 
-(defbasicblocksegmacro parent-error [component component-by-id :> maybe-error]
+(defbasicblocksegmacro parent-error 
+  "Check the parent exists and that there is no loop in the hierarchy, return
+    error data if not."
+  [component component-by-id :> maybe-error] ; args
   [[get component :parent :> '*parent#] ; notice keywords can't be used as fns in here :'( => get
    [get component :_id :> '*self#]
    [<<if (seg# not '*parent#)
@@ -89,7 +92,7 @@
         (invoke-query "ancestor?" *needle *parent :> *ancestor?))
       (|origin))
 
-    (<<query-topology topologies "ancestors" ;; TODO May be simpler with a recursive, 1-child->parent topo?
+    (<<query-topology topologies "ancestors"
       [*children :> *child->ancestors]
       (ops/explode *children :> *child)
       (loop<- [*child *child, *ancestors [] :> *ancestors]
@@ -99,7 +102,6 @@
           (continue> *parent *ancestors)
           (else>)
           (:> *ancestors)))
-      ; TODO Could I rewrite this somehow with the loop emitting each parent, and aggs/+vec-agg to collect them?
       ;(identity {*child (not-empty *ancestors)} :> *child->ancestors)
       ; Note: This ☝️ works, but only for single input - otherwise 'multiple query outputs' error => need the map-agg below
       (|origin)

@@ -7,5 +7,5 @@
   :profiles {:dev {:resource-paths ["test/resources/"]
                    :dependencies [[nrepl "1.1.0"]
                                   ["djblue/portal" "RELEASE" :exclusions [org.clojure/clojure]]]}
-             :provided {:dependencies [[com.rpl/rama "0.11.9"]]}}
+             :provided {:dependencies [[com.rpl/rama "0.12.1"]]}}
   )
